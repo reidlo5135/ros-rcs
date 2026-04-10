@@ -4,6 +4,12 @@ Changelog
 2026-04-10
 ----------
 
+- Started the ``0.1.2`` iteration:
+
+  - merged the shared ``scene3d`` viewer package back into ``packages/ui`` to simplify the workspace structure
+  - kept the Scene viewport, protocol types, and viz feature code together inside the UI package
+  - removed the extra package boundary so dashboard work can evolve in one place
+
 - Started the ``0.1.1`` iteration:
 
   - aligned the ``packages/ui/src/features/viz`` directory layout with the upstream-style ``layout``, ``panels``, ``scene``, ``hooks``, ``pages``, and ``styles`` slices

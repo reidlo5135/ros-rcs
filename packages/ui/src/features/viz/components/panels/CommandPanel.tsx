@@ -4,6 +4,7 @@ type CommandPanelProps = {
   goalX: string;
   goalY: string;
   goalYaw: string;
+  poseInteractionMode: "idle" | "goal" | "initial_pose";
   onGoalXChange: (value: string) => void;
   onGoalYChange: (value: string) => void;
   onGoalYawChange: (value: string) => void;
@@ -17,6 +18,7 @@ export function CommandPanel({
   goalX,
   goalY,
   goalYaw,
+  poseInteractionMode,
   onGoalXChange,
   onGoalYChange,
   onGoalYawChange,
@@ -48,11 +50,21 @@ export function CommandPanel({
       </div>
 
       <div className="rcs-button-row rcs-button-row--split">
-        <button className="rcs-button rcs-button--neutral" type="button" onClick={onSend}>Send</button>
+        <button
+          className={`rcs-button rcs-button--neutral ${poseInteractionMode === "goal" ? "rcs-button--armed-goal" : ""}`}
+          type="button"
+          onClick={onSend}
+        >
+          Send
+        </button>
         <button className="rcs-button rcs-button--danger" type="button" onClick={onCancel}>Cancel</button>
       </div>
 
-      <button className="rcs-button rcs-button--wide rcs-button--teal-soft" type="button" onClick={onSetInitialPose}>
+      <button
+        className={`rcs-button rcs-button--wide rcs-button--teal-soft ${poseInteractionMode === "initial_pose" ? "rcs-button--armed-initial" : ""}`}
+        type="button"
+        onClick={onSetInitialPose}
+      >
         Set Initial Pose
       </button>
     </section>

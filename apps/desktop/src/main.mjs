@@ -17,6 +17,7 @@ function createMainWindow() {
     height,
     minWidth: 900,
     minHeight: 700,
+    icon: path.resolve(__dirname, "../assets/favicon.ico"),
     autoHideMenuBar: true,
     show: false,
     backgroundColor: "#e8e8e6",

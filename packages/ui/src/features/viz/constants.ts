@@ -5,7 +5,7 @@ import {
   defaultVizTopics,
   vizTopicDefinitions,
 } from "@rcs/protocol";
-import type { BridgeState, MotionStatusMessage, Pose } from "@rcs/scene3d";
+import type { BridgeState, MotionStatusMessage, Pose } from "./lib/protocol";
 
 import type { EventEntry, LayerEntry } from "./types";
 
@@ -68,4 +68,3 @@ export const commandTopicModalEntries = commandTopicDefinitions.map(({ key, labe
 export const displayTopicModalEntries = vizTopicDefinitions.map(({ key, label }) => ({ key, label }));
 
 export { defaultCommandTopics, defaultVizTopics };
-

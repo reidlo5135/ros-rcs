@@ -29,7 +29,7 @@ import {
   type RobotDescriptionMessage,
   type TfMessage,
   type ViewMode,
-} from "@rcs/scene3d";
+} from "../lib/protocol";
 import { TopicSettingsModal } from "../../../TopicSettingsModal";
 import { Topbar } from "../components/layout/Topbar";
 import { EventsPanel } from "../components/panels/EventsPanel";
@@ -555,6 +555,28 @@ function parseTfMessage(payload: unknown): TfMessage | null {
   };
 }
 
+function mergeTfMessages(current: TfMessage | undefined, incoming: TfMessage): TfMessage {
+  const byChildFrame = new Map<string, TfMessage["transforms"][number]>();
+
+  for (const transform of current?.transforms ?? []) {
+    if (!transform.child_frame_id) {
+      continue;
+    }
+    byChildFrame.set(transform.child_frame_id, transform);
+  }
+
+  for (const transform of incoming.transforms) {
+    if (!transform.child_frame_id) {
+      continue;
+    }
+    byChildFrame.set(transform.child_frame_id, transform);
+  }
+
+  return {
+    transforms: Array.from(byChildFrame.values()),
+  };
+}
+
 function parseRobotDescription(payload: unknown): RobotDescriptionMessage | null {
   if (typeof payload === "string" && payload.trim()) {
     return { data: payload };
@@ -817,6 +839,7 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
   const [signalLastSeenAt, setSignalLastSeenAt] = useState<number | null>(null);
 
   const clientRef = useRef<MqttClient | null>(null);
+  const bridgeStateRef = useRef<BridgeState>(INITIAL_BRIDGE_STATE);
   const seenTopicKeysRef = useRef(new Set<VizTopicKey>());
   const livePoseActiveRef = useRef(false);
   const vizTopicsRef = useRef(vizTopics);
@@ -877,10 +900,18 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
         return;
       }
       startTransition(() => {
-        setBridgeState((current: BridgeState) => ({ ...current, ...nextPatch }));
+        setBridgeState((current: BridgeState) => {
+          const nextState = { ...current, ...nextPatch };
+          bridgeStateRef.current = nextState;
+          return nextState;
+        });
       });
     });
   };
+
+  useEffect(() => {
+    bridgeStateRef.current = bridgeState;
+  }, [bridgeState]);
 
   useEffect(() => {
     vizTopicsRef.current = vizTopics;
@@ -1195,14 +1226,16 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
         case "tf": {
           const nextTf = parseTfMessage(effectivePayload);
           if (nextTf) {
-            scheduleBridgePatch({ tf: nextTf });
+            const pendingTf = pendingBridgePatchRef.current.tf ?? bridgeStateRef.current.tf;
+            scheduleBridgePatch({ tf: mergeTfMessages(pendingTf, nextTf) });
           }
           break;
         }
         case "tfStatic": {
           const nextTfStatic = parseTfMessage(effectivePayload);
           if (nextTfStatic) {
-            scheduleBridgePatch({ tf_static: nextTfStatic });
+            const pendingTfStatic = pendingBridgePatchRef.current.tf_static ?? bridgeStateRef.current.tf_static;
+            scheduleBridgePatch({ tf_static: mergeTfMessages(pendingTfStatic, nextTfStatic) });
           }
           break;
         }
@@ -1325,6 +1358,7 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
             goalX={goalX}
             goalY={goalY}
             goalYaw={goalYaw}
+            poseInteractionMode={poseInteractionMode}
             onGoalXChange={setGoalX}
             onGoalYChange={setGoalY}
             onGoalYawChange={setGoalYaw}
