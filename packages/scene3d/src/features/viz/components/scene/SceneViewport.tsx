@@ -19,6 +19,15 @@ type SceneViewportProps = {
   viewMode: ViewMode;
   onResetView?: () => void;
   resetViewToken?: number;
+  goalMarker?: {
+    x: number;
+    y: number;
+    yaw: number;
+    kind: "goal" | "initial_pose";
+  } | null;
+  interactionMode?: "idle" | "goal" | "initial_pose";
+  onPoseSelection?: (x: number, y: number, yaw: number) => void;
+  onPosePlacement?: (mode: "goal" | "initial_pose", x: number, y: number, yaw: number) => void;
   layerVisibility: {
     grid: boolean;
     map: boolean;
@@ -69,6 +78,18 @@ type Bounds2D = {
   maxX: number;
   minY: number;
   maxY: number;
+};
+
+const ROBOT_LOCAL_ORIGIN_POSE: Pose = {
+  header: { frame_id: "map" },
+  position: { x: 0, y: 0, z: 0 },
+  orientation: {
+    x: 0,
+    y: 0,
+    z: 0,
+    w: 1,
+    yaw: 0,
+  },
 };
 
 const urdfVisualCache = new Map<string, UrdfVisual[]>();
@@ -471,12 +492,12 @@ function buildArrowPoseMarker(
 
 function buildGoalMarker(goalMarker: { x: number; y: number; yaw: number; kind: "goal" | "initial_pose" }) {
   return goalMarker.kind === "initial_pose"
-    ? buildArrowPoseMarker(goalMarker, { primary: "#21b7bc", accent: "#0f7880" }, {
+    ? buildArrowPoseMarker(goalMarker, { primary: "#2aa84a", accent: "#d9f7df" }, {
       originFillRadius: 0.043,
       originRingInnerRadius: 0.05,
       originRingOuterRadius: 0.075,
     })
-    : buildArrowPoseMarker(goalMarker, { primary: "#f3a533", accent: "#c77d10" });
+    : buildArrowPoseMarker(goalMarker, { primary: "#d62828", accent: "#ffe3e3" });
 }
 
 function buildGridOutline(grid: OccupancyGridMessage, color: string, yOffset: number) {
@@ -1359,7 +1380,18 @@ function buildRobotModelGroup(
   return group;
 }
 
-export function SceneViewport({ target, state, viewMode, layerVisibility, onResetView, resetViewToken }: SceneViewportProps) {
+export function SceneViewport({
+  target,
+  state,
+  viewMode,
+  layerVisibility,
+  onResetView,
+  resetViewToken,
+  goalMarker,
+  interactionMode = "idle",
+  onPoseSelection,
+  onPosePlacement,
+}: SceneViewportProps) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -1383,7 +1415,58 @@ export function SceneViewport({ target, state, viewMode, layerVisibility, onRese
   const scanRef = useRef<THREE.Points | null>(null);
   const tfGroupRef = useRef<THREE.Group | null>(null);
   const goalMarkerRef = useRef<THREE.Group | null>(null);
+  const previewMarkerRef = useRef<THREE.Group | null>(null);
   const lastCenteredMapSignatureRef = useRef("");
+  const previousRobotInputsRef = useRef<{
+    robotDescription?: BridgeState["robot_description"];
+    tfStatic?: BridgeState["tf_static"];
+  }>({});
+  const previousPathInputsRef = useRef<{
+    globalPath?: BridgeState["global_path"];
+    localPath?: BridgeState["local_path"];
+  }>({});
+  const previousMapInputsRef = useRef<{
+    map?: BridgeState["map"];
+    globalCostmap?: BridgeState["global_costmap"];
+    localCostmap?: BridgeState["local_costmap"];
+  }>({});
+  const previousFootprintInputsRef = useRef<{
+    footprintPolygon?: number[];
+    robotPose?: BridgeState["robot_pose"];
+    motionStatus?: BridgeState["motion_status"];
+  }>({});
+  const previousScanInputsRef = useRef<{
+    scan?: BridgeState["scan"];
+    tf?: BridgeState["tf"];
+    tfStatic?: BridgeState["tf_static"];
+    robotPose?: BridgeState["robot_pose"];
+  }>({});
+  const previousTfInputsRef = useRef<{
+    tf?: BridgeState["tf"];
+    tfStatic?: BridgeState["tf_static"];
+    robotPose?: BridgeState["robot_pose"];
+  }>({});
+  const previousGoalMarkerRef = useRef<SceneViewportProps["goalMarker"]>(null);
+  const interactionModeRef = useRef<SceneViewportProps["interactionMode"]>("idle");
+  const onPoseSelectionRef = useRef<SceneViewportProps["onPoseSelection"]>(undefined);
+  const onPosePlacementRef = useRef<SceneViewportProps["onPosePlacement"]>(undefined);
+  const interactionStateRef = useRef<{
+    mode: "goal" | "initial_pose";
+    start: THREE.Vector3;
+  } | null>(null);
+
+  useEffect(() => {
+    interactionModeRef.current = interactionMode;
+  }, [interactionMode]);
+
+  useEffect(() => {
+    onPoseSelectionRef.current = onPoseSelection;
+  }, [onPoseSelection]);
+
+  useEffect(() => {
+    onPosePlacementRef.current = onPosePlacement;
+  }, [onPosePlacement]);
+
   useEffect(() => {
     if (!viewportRef.current) {
       return undefined;
@@ -1483,6 +1566,103 @@ export function SceneViewport({ target, state, viewMode, layerVisibility, onRese
     observer.observe(viewportRef.current);
     window.addEventListener("resize", resize);
 
+    const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
+    const intersection = new THREE.Vector3();
+
+    const readGroundPoint = (event: PointerEvent) => {
+      const bounds = renderer.domElement.getBoundingClientRect();
+      pointer.x = ((event.clientX - bounds.left) / bounds.width) * 2 - 1;
+      pointer.y = -(((event.clientY - bounds.top) / bounds.height) * 2 - 1);
+      raycaster.setFromCamera(pointer, camera);
+      return raycaster.ray.intersectPlane(groundPlane, intersection) ? intersection.clone() : null;
+    };
+
+    const clearPreview = () => {
+      if (!previewMarkerRef.current) {
+        return;
+      }
+      scene.remove(previewMarkerRef.current);
+      disposeObject(previewMarkerRef.current);
+      previewMarkerRef.current = null;
+    };
+
+    const updatePreview = (mode: "goal" | "initial_pose", start: THREE.Vector3, current: THREE.Vector3) => {
+      clearPreview();
+      const dx = current.x - start.x;
+      const dy = -(current.z - start.z);
+      const yaw = Math.atan2(dy, dx || 0.0001);
+      previewMarkerRef.current = buildGoalMarker({
+        x: start.x,
+        y: -start.z,
+        yaw,
+        kind: mode,
+      });
+      scene.add(previewMarkerRef.current);
+      renderScene();
+    };
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const currentMode = interactionModeRef.current;
+      if ((currentMode !== "goal" && currentMode !== "initial_pose") || event.button !== 0) {
+        return;
+      }
+
+      const point = readGroundPoint(event);
+      if (!point) {
+        return;
+      }
+
+      controls.enabled = false;
+      interactionStateRef.current = {
+        mode: currentMode,
+        start: point,
+      };
+      updatePreview(currentMode, point, point);
+      event.preventDefault();
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      if (!interactionStateRef.current) {
+        return;
+      }
+
+      const point = readGroundPoint(event);
+      if (!point) {
+        return;
+      }
+
+      updatePreview(interactionStateRef.current.mode, interactionStateRef.current.start, point);
+      event.preventDefault();
+    };
+
+    const handlePointerUp = (event: PointerEvent) => {
+      if (!interactionStateRef.current) {
+        return;
+      }
+
+      const point = readGroundPoint(event) ?? interactionStateRef.current.start;
+      const { mode, start } = interactionStateRef.current;
+      interactionStateRef.current = null;
+      controls.enabled = true;
+      clearPreview();
+
+      const dx = point.x - start.x;
+      const dy = -(point.z - start.z);
+      const yaw = Math.atan2(dy, dx || 0.0001);
+      onPoseSelectionRef.current?.(start.x, -start.z, yaw);
+      onPosePlacementRef.current?.(mode, start.x, -start.z, yaw);
+      event.preventDefault();
+    };
+
+    const handleContextMenu = (event: Event) => event.preventDefault();
+
+    renderer.domElement.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    renderer.domElement.addEventListener("contextmenu", handleContextMenu);
+
     sceneRef.current = scene;
     rendererRef.current = renderer;
     cameraRef.current = camera;
@@ -1491,7 +1671,13 @@ export function SceneViewport({ target, state, viewMode, layerVisibility, onRese
     gridRef.current = grid;
 
     return () => {
+      clearPreview();
+      controls.enabled = true;
       observer.disconnect();
+      renderer.domElement.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      renderer.domElement.removeEventListener("contextmenu", handleContextMenu);
       window.removeEventListener("resize", resize);
       renderRef.current = null;
       controls.dispose();
@@ -1509,6 +1695,7 @@ export function SceneViewport({ target, state, viewMode, layerVisibility, onRese
       disposeObject(scanRef.current);
       disposeObject(tfGroupRef.current);
       disposeObject(goalMarkerRef.current);
+      disposeObject(previewMarkerRef.current);
       disposeObject(robotMarkerRef.current);
       disposeObject(robot);
       renderer.dispose();
@@ -1531,13 +1718,29 @@ export function SceneViewport({ target, state, viewMode, layerVisibility, onRese
       gridRef.current.visible = layerVisibility.grid;
     }
 
-    while (robot.children.length > 0) {
-      const child = robot.children[0];
-      robot.remove(child);
-      disposeObject(child);
-    }
     robot.visible = layerVisibility.robot;
-    robot.add(buildRobotModelGroup(state.robot_description?.data, state.tf, state.tf_static, robotPose));
+    const shouldRebuildRobot =
+      previousRobotInputsRef.current.robotDescription !== state.robot_description
+      || previousRobotInputsRef.current.tfStatic !== state.tf_static;
+    if (shouldRebuildRobot) {
+      while (robot.children.length > 0) {
+        const child = robot.children[0];
+        robot.remove(child);
+        disposeObject(child);
+      }
+      robot.add(buildRobotModelGroup(
+        state.robot_description?.data,
+        undefined,
+        state.tf_static,
+        ROBOT_LOCAL_ORIGIN_POSE,
+      ));
+      previousRobotInputsRef.current = {
+        robotDescription: state.robot_description,
+        tfStatic: state.tf_static,
+      };
+    }
+    robot.position.set(robotPose?.position.x ?? 0, 0, -(robotPose?.position.y ?? 0));
+    robot.rotation.set(0, -(robotPose?.orientation.yaw ?? 0), 0);
 
     if (robotMarkerRef.current) {
       scene.remove(robotMarkerRef.current);
@@ -1545,34 +1748,54 @@ export function SceneViewport({ target, state, viewMode, layerVisibility, onRese
       robotMarkerRef.current = null;
     }
 
-    disposeObject(globalPathRef.current);
-    disposeObject(localPathRef.current);
-    if (globalPathRef.current) {
-      scene.remove(globalPathRef.current);
-      globalPathRef.current = null;
-    }
-    if (localPathRef.current) {
-      scene.remove(localPathRef.current);
-      localPathRef.current = null;
-    }
+    const shouldRebuildPaths =
+      previousPathInputsRef.current.globalPath !== state.global_path
+      || previousPathInputsRef.current.localPath !== state.local_path;
+    if (shouldRebuildPaths) {
+      disposeObject(globalPathRef.current);
+      disposeObject(localPathRef.current);
+      if (globalPathRef.current) {
+        scene.remove(globalPathRef.current);
+        globalPathRef.current = null;
+      }
+      if (localPathRef.current) {
+        scene.remove(localPathRef.current);
+        localPathRef.current = null;
+      }
 
-    const globalPath = state.global_path?.poses.map((pose) => ({ x: pose.position.x, y: pose.position.y })) ?? [];
-    const localPath = state.local_path?.poses.map((pose) => ({ x: pose.position.x, y: pose.position.y })) ?? [];
-    globalPathRef.current = buildPathLine(globalPath, "#23d9ff", 0.06);
-    localPathRef.current = buildPathLine(localPath, "#95dd00", 0.08);
+      const globalPath = state.global_path?.poses.map((pose) => ({ x: pose.position.x, y: pose.position.y })) ?? [];
+      const localPath = state.local_path?.poses.map((pose) => ({ x: pose.position.x, y: pose.position.y })) ?? [];
+      globalPathRef.current = buildPathLine(globalPath, "#23d9ff", 0.06);
+      localPathRef.current = buildPathLine(localPath, "#95dd00", 0.08);
+      if (globalPathRef.current) {
+        scene.add(globalPathRef.current);
+      }
+      if (localPathRef.current) {
+        scene.add(localPathRef.current);
+      }
+      previousPathInputsRef.current = {
+        globalPath: state.global_path,
+        localPath: state.local_path,
+      };
+    }
     if (globalPathRef.current) {
       globalPathRef.current.visible = layerVisibility.globalPlan;
-      scene.add(globalPathRef.current);
     }
     if (localPathRef.current) {
       localPathRef.current.visible = layerVisibility.localPlan;
-      scene.add(localPathRef.current);
     }
 
-    if (goalMarkerRef.current) {
-      scene.remove(goalMarkerRef.current);
-      disposeObject(goalMarkerRef.current);
-      goalMarkerRef.current = null;
+    if (previousGoalMarkerRef.current !== goalMarker) {
+      if (goalMarkerRef.current) {
+        scene.remove(goalMarkerRef.current);
+        disposeObject(goalMarkerRef.current);
+        goalMarkerRef.current = null;
+      }
+      if (goalMarker) {
+        goalMarkerRef.current = buildGoalMarker(goalMarker);
+        scene.add(goalMarkerRef.current);
+      }
+      previousGoalMarkerRef.current = goalMarker;
     }
 
     for (const [ref, outlineRef, grid, palette, yOffset] of [
@@ -1580,105 +1803,158 @@ export function SceneViewport({ target, state, viewMode, layerVisibility, onRese
       [globalCostmapMeshRef, globalCostmapOutlineRef, state.global_costmap, "global_costmap", 0.02],
       [localCostmapMeshRef, localCostmapOutlineRef, state.local_costmap, "local_costmap", 0.03],
     ] as const) {
+      const previousGrid =
+        palette === "map" ? previousMapInputsRef.current.map :
+        palette === "global_costmap" ? previousMapInputsRef.current.globalCostmap :
+        previousMapInputsRef.current.localCostmap;
+      if (previousGrid !== grid) {
+        if (ref.current) {
+          scene.remove(ref.current);
+          disposeObject(ref.current);
+          ref.current = null;
+        }
+        if (outlineRef.current) {
+          scene.remove(outlineRef.current);
+          disposeObject(outlineRef.current);
+          outlineRef.current = null;
+        }
+        if (grid) {
+          ref.current = buildOccupancyMesh(grid, palette, yOffset);
+          scene.add(ref.current);
+        }
+      }
       if (ref.current) {
-        scene.remove(ref.current);
-        disposeObject(ref.current);
-        ref.current = null;
-      }
-      if (outlineRef.current) {
-        scene.remove(outlineRef.current);
-        disposeObject(outlineRef.current);
-        outlineRef.current = null;
-      }
-      if (grid) {
-        ref.current = buildOccupancyMesh(grid, palette, yOffset);
         ref.current.visible =
           palette === "map" ? layerVisibility.map :
           palette === "global_costmap" ? layerVisibility.globalCostmap :
           layerVisibility.localCostmap;
-        scene.add(ref.current);
       }
     }
+    previousMapInputsRef.current = {
+      map: state.map,
+      globalCostmap: state.global_costmap,
+      localCostmap: state.local_costmap,
+    };
 
-    if (footprintRef.current) {
-      scene.remove(footprintRef.current);
-      disposeObject(footprintRef.current);
-      footprintRef.current = null;
+    const footprintPolygon = state.robot_description?.footprint_polygon;
+    const shouldRebuildFootprints =
+      previousFootprintInputsRef.current.footprintPolygon !== footprintPolygon
+      || previousFootprintInputsRef.current.robotPose !== robotPose
+      || previousFootprintInputsRef.current.motionStatus !== state.motion_status;
+    if (shouldRebuildFootprints) {
+      if (footprintRef.current) {
+        scene.remove(footprintRef.current);
+        disposeObject(footprintRef.current);
+        footprintRef.current = null;
+      }
+      footprintRef.current = buildFootprintOverlay(
+        footprintPolygon,
+        robotPose,
+        state.motion_status?.costmap_blocked || state.motion_status?.safety_gate_blocked
+          ? {
+            fillColor: state.motion_status?.safety_gate_blocked ? "#ff4b4b" : "#3f7dff",
+            outlineColor: state.motion_status?.safety_gate_blocked ? "#9b1818" : "#1a3d96",
+            fillOpacity: 0.16,
+            yOffset: 0.044,
+            renderOrder: 19,
+          }
+          : undefined,
+      );
+      if (footprintRef.current) {
+        scene.add(footprintRef.current);
+      }
+
+      if (blockedFootprintRef.current) {
+        scene.remove(blockedFootprintRef.current);
+        disposeObject(blockedFootprintRef.current);
+        blockedFootprintRef.current = null;
+      }
+      if (state.motion_status?.has_blocked_pose) {
+        blockedFootprintRef.current = buildFootprintOverlay(
+          footprintPolygon,
+          state.motion_status.blocked_pose,
+          {
+            fillColor: "#4cff63",
+            outlineColor: "#0e8d22",
+            fillOpacity: 0.1,
+            yOffset: 0.052,
+            renderOrder: 22,
+          },
+        );
+      }
+      if (blockedFootprintRef.current) {
+        scene.add(blockedFootprintRef.current);
+      }
+
+      if (blockedLinkRef.current) {
+        scene.remove(blockedLinkRef.current);
+        disposeObject(blockedLinkRef.current);
+        blockedLinkRef.current = null;
+      }
+      if (state.motion_status?.has_blocked_pose) {
+        blockedLinkRef.current = buildBlockedLinkOverlay(robotPose, state.motion_status.blocked_pose);
+      }
+      if (blockedLinkRef.current) {
+        scene.add(blockedLinkRef.current);
+      }
+      previousFootprintInputsRef.current = {
+        footprintPolygon,
+        robotPose,
+        motionStatus: state.motion_status,
+      };
     }
-    footprintRef.current = buildFootprintOverlay(
-      state.robot_description?.footprint_polygon,
-      robotPose,
-      state.motion_status?.costmap_blocked || state.motion_status?.safety_gate_blocked
-        ? {
-          fillColor: state.motion_status?.safety_gate_blocked ? "#ff4b4b" : "#3f7dff",
-          outlineColor: state.motion_status?.safety_gate_blocked ? "#9b1818" : "#1a3d96",
-          fillOpacity: 0.16,
-          yOffset: 0.044,
-          renderOrder: 19,
-        }
-        : undefined,
-    );
     if (footprintRef.current) {
       footprintRef.current.visible = layerVisibility.footprint;
-      scene.add(footprintRef.current);
     }
 
-    if (blockedFootprintRef.current) {
-      scene.remove(blockedFootprintRef.current);
-      disposeObject(blockedFootprintRef.current);
-      blockedFootprintRef.current = null;
+    const shouldRebuildScan =
+      previousScanInputsRef.current.scan !== state.scan
+      || previousScanInputsRef.current.tf !== state.tf
+      || previousScanInputsRef.current.tfStatic !== state.tf_static
+      || previousScanInputsRef.current.robotPose !== robotPose;
+    if (shouldRebuildScan) {
+      if (scanRef.current) {
+        scene.remove(scanRef.current);
+        disposeObject(scanRef.current);
+        scanRef.current = null;
+      }
+      scanRef.current = buildScanPoints(state.scan, state.tf, state.tf_static, robotPose);
+      if (scanRef.current) {
+        scene.add(scanRef.current);
+      }
+      previousScanInputsRef.current = {
+        scan: state.scan,
+        tf: state.tf,
+        tfStatic: state.tf_static,
+        robotPose,
+      };
     }
-    if (state.motion_status?.has_blocked_pose) {
-      blockedFootprintRef.current = buildFootprintOverlay(
-        state.robot_description?.footprint_polygon,
-        state.motion_status.blocked_pose,
-        {
-          fillColor: "#4cff63",
-          outlineColor: "#0e8d22",
-          fillOpacity: 0.1,
-          yOffset: 0.052,
-          renderOrder: 22,
-        },
-      );
-    }
-    if (blockedFootprintRef.current) {
-      blockedFootprintRef.current.visible = true;
-      scene.add(blockedFootprintRef.current);
-    }
-
-    if (blockedLinkRef.current) {
-      scene.remove(blockedLinkRef.current);
-      disposeObject(blockedLinkRef.current);
-      blockedLinkRef.current = null;
-    }
-    if (state.motion_status?.has_blocked_pose) {
-      blockedLinkRef.current = buildBlockedLinkOverlay(robotPose, state.motion_status.blocked_pose);
-    }
-    if (blockedLinkRef.current) {
-      blockedLinkRef.current.visible = true;
-      scene.add(blockedLinkRef.current);
-    }
-
-    if (scanRef.current) {
-      scene.remove(scanRef.current);
-      disposeObject(scanRef.current);
-      scanRef.current = null;
-    }
-    scanRef.current = buildScanPoints(state.scan, state.tf, state.tf_static, robotPose);
     if (scanRef.current) {
       scanRef.current.visible = layerVisibility.scan;
-      scene.add(scanRef.current);
     }
 
-    if (tfGroupRef.current) {
-      scene.remove(tfGroupRef.current);
-      disposeObject(tfGroupRef.current);
-      tfGroupRef.current = null;
+    const shouldRebuildTfGroup =
+      previousTfInputsRef.current.tf !== state.tf
+      || previousTfInputsRef.current.tfStatic !== state.tf_static
+      || previousTfInputsRef.current.robotPose !== robotPose;
+    if (shouldRebuildTfGroup) {
+      if (tfGroupRef.current) {
+        scene.remove(tfGroupRef.current);
+        disposeObject(tfGroupRef.current);
+        tfGroupRef.current = null;
+      }
+      tfGroupRef.current = buildTfGroup(state.tf, state.tf_static, robotPose);
+      if (tfGroupRef.current) {
+        scene.add(tfGroupRef.current);
+      }
+      previousTfInputsRef.current = {
+        tf: state.tf,
+        tfStatic: state.tf_static,
+        robotPose,
+      };
     }
-    tfGroupRef.current = buildTfGroup(state.tf, state.tf_static, robotPose);
     if (tfGroupRef.current) {
       tfGroupRef.current.visible = layerVisibility.tf;
-      scene.add(tfGroupRef.current);
     }
 
     const activeMap = state.map ?? state.local_costmap ?? state.global_costmap;
@@ -1716,7 +1992,7 @@ export function SceneViewport({ target, state, viewMode, layerVisibility, onRese
     }
 
     renderRef.current?.();
-  }, [layerVisibility, state, viewMode]);
+  }, [goalMarker, layerVisibility, state, viewMode]);
 
   useEffect(() => {
     const camera = cameraRef.current;
@@ -1756,7 +2032,7 @@ export function SceneViewport({ target, state, viewMode, layerVisibility, onRese
       activeMap.info.origin.orientation.yaw,
     ].join(":");
     renderRef.current?.();
-  }, [resetViewToken, state.global_costmap, state.local_costmap, state.map]);
+  }, [resetViewToken]);
 
   return (
     <section className="rcs-scene-panel">

@@ -13,9 +13,24 @@ type TopicSettingsModalProps = {
   description: string;
   topics: TopicSettingDefinition[];
   values: Record<string, string>;
+  previewRobotId?: string;
   onClose: () => void;
   onSave: (nextValues: Record<string, string>) => void;
 };
+
+function materializeRobotId(topic: string, robotId?: string) {
+  if (!robotId) {
+    return topic;
+  }
+  return topic.replaceAll("{robot_id}", robotId);
+}
+
+function restoreRobotIdTemplate(topic: string, robotId?: string) {
+  if (!robotId) {
+    return topic;
+  }
+  return topic.replaceAll(robotId, "{robot_id}");
+}
 
 export const TopicSettingsModal: FC<TopicSettingsModalProps> = ({
   open,
@@ -23,6 +38,7 @@ export const TopicSettingsModal: FC<TopicSettingsModalProps> = ({
   description,
   topics,
   values,
+  previewRobotId,
   onClose,
   onSave,
 }) => {
@@ -31,9 +47,13 @@ export const TopicSettingsModal: FC<TopicSettingsModalProps> = ({
 
   useEffect(() => {
     if (open) {
-      setDraftValues(values);
+      setDraftValues(
+        Object.fromEntries(
+          Object.entries(values).map(([key, value]) => [key, materializeRobotId(value, previewRobotId)]),
+        ),
+      );
     }
-  }, [open, values]);
+  }, [open, previewRobotId, values]);
 
   useEffect(() => {
     if (!open) {
@@ -93,7 +113,15 @@ export const TopicSettingsModal: FC<TopicSettingsModalProps> = ({
             <button type="button" className="rcs-button rcs-button--danger rcs-modal__action-button" onClick={onClose}>
               Cancel
             </button>
-            <button type="button" className="rcs-button rcs-button--success rcs-modal__action-button" onClick={() => onSave(draftValues)}>
+            <button
+              type="button"
+              className="rcs-button rcs-button--success rcs-modal__action-button"
+              onClick={() => onSave(
+                Object.fromEntries(
+                  Object.entries(draftValues).map(([key, value]) => [key, restoreRobotIdTemplate(value, previewRobotId)]),
+                ),
+              )}
+            >
               Save
             </button>
           </div>

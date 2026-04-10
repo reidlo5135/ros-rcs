@@ -81,6 +81,8 @@ type SceneLayerVisibility = {
   tf: boolean;
 };
 
+type PoseInteractionMode = "idle" | "goal" | "initial_pose";
+
 const target = createDemoTarget();
 const PAD_RADIUS = 66;
 const KNOB_RADIUS = 17;
@@ -786,6 +788,13 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
   const [goalX, setGoalX] = useState("2.5");
   const [goalY, setGoalY] = useState("0.0");
   const [goalYaw, setGoalYaw] = useState("0.0");
+  const [poseInteractionMode, setPoseInteractionMode] = useState<PoseInteractionMode>("idle");
+  const [sceneGoalMarker, setSceneGoalMarker] = useState<{
+    x: number;
+    y: number;
+    yaw: number;
+    kind: "goal" | "initial_pose";
+  } | null>(null);
   const [commandSettingsOpen, setCommandSettingsOpen] = useState(false);
   const [visualizationSettingsOpen, setVisualizationSettingsOpen] = useState(false);
   const [sceneResetToken, setSceneResetToken] = useState(0);
@@ -820,6 +829,9 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
   const activeTarget = useMemo(() => ({ ...target, id: robotId.trim() || target.id }), [robotId]);
   const robotPose = bridgeState.robot_pose ?? DEFAULT_ROBOT_POSE;
   const motionStatus = bridgeState.motion_status ?? INITIAL_MOTION_STATUS;
+  const connectedRobotId = connectionLabel.startsWith("MQTT connected:")
+    ? (robotId.trim() || "robot1")
+    : undefined;
   const batteryPercentage = (() => {
     const percentage = bridgeState.battery_state?.percentage ?? bridgeState.battery_state?.battery?.percentage ?? null;
     if (percentage == null || !Number.isFinite(percentage)) {
@@ -918,6 +930,47 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
 
       pushEvent(`${label} published: ${resolvedTopic}`);
     });
+  };
+
+  const handlePoseSelection = (x: number, y: number, yaw: number) => {
+    setGoalX(x.toFixed(2));
+    setGoalY(y.toFixed(2));
+    setGoalYaw(yaw.toFixed(2));
+  };
+
+  const handlePosePlacement = (mode: "goal" | "initial_pose", x: number, y: number, yaw: number) => {
+    setPoseInteractionMode("idle");
+    setSceneGoalMarker({
+      x,
+      y,
+      yaw,
+      kind: mode,
+    });
+
+    if (mode === "goal") {
+      publishCommand(commandTopics.navigateToPose, {
+        request_id: createCommandId(),
+        goal_pose: {
+          header: {
+            frame_id: "map",
+          },
+          pose: {
+            position: { x, y, z: 0 },
+            orientation: createQuaternionFromYaw(yaw),
+          },
+        },
+      }, "Navigate To Pose");
+      return;
+    }
+
+    publishCommand(commandTopics.setInitialPose, {
+      request_id: createCommandId(),
+      frame_id: "map",
+      pose: {
+        position: { x, y, z: 0 },
+        orientation: createQuaternionFromYaw(yaw),
+      },
+    }, "Set Initial Pose");
   };
 
   const syncVizSubscriptions = (
@@ -1276,41 +1329,36 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
             onGoalYChange={setGoalY}
             onGoalYawChange={setGoalYaw}
             onSend={() => {
-              const x = Number(goalX) || 0;
-              const y = Number(goalY) || 0;
-              const yaw = Number(goalYaw) || 0;
-
-              publishCommand(commandTopics.navigateToPose, {
-                request_id: createCommandId(),
-                goal_pose: {
-                  header: {
-                    frame_id: "map",
-                  },
-                  pose: {
-                    position: { x, y, z: 0 },
-                    orientation: createQuaternionFromYaw(yaw),
-                  },
-                },
-              }, "Navigate To Pose");
+              setPoseInteractionMode((current) => {
+                const nextMode = current === "goal" ? "idle" : "goal";
+                if (nextMode === "goal") {
+                  setSceneGoalMarker(null);
+                  pushEvent("Navigate To Pose armed: drag on the map to place a goal");
+                }
+                return nextMode;
+              });
             }}
             onCancel={() => {
+              const wasInitialPoseMode = poseInteractionMode === "initial_pose";
+              setPoseInteractionMode("idle");
+              setSceneGoalMarker(null);
+              if (wasInitialPoseMode) {
+                pushEvent("Initial pose placement canceled");
+                return;
+              }
               publishCommand(commandTopics.cancelNavigateToPose, {
                 request_id: createCommandId(),
               }, "Cancel Navigate To Pose");
             }}
             onSetInitialPose={() => {
-              const x = Number(goalX) || 0;
-              const y = Number(goalY) || 0;
-              const yaw = Number(goalYaw) || 0;
-
-              publishCommand(commandTopics.setInitialPose, {
-                request_id: createCommandId(),
-                frame_id: "map",
-                pose: {
-                  position: { x, y, z: 0 },
-                  orientation: createQuaternionFromYaw(yaw),
-                },
-              }, "Set Initial Pose");
+              setPoseInteractionMode((current) => {
+                const nextMode = current === "initial_pose" ? "idle" : "initial_pose";
+                if (nextMode === "initial_pose") {
+                  setSceneGoalMarker(null);
+                  pushEvent("Set Initial Pose armed: drag on the map to place the pose");
+                }
+                return nextMode;
+              });
             }}
             onOpenSettings={() => setCommandSettingsOpen(true)}
           />
@@ -1334,6 +1382,10 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
             viewMode={modeLabel}
             onResetView={() => setSceneResetToken((current) => current + 1)}
             resetViewToken={sceneResetToken}
+            goalMarker={sceneGoalMarker}
+            interactionMode={poseInteractionMode}
+            onPoseSelection={handlePoseSelection}
+            onPosePlacement={handlePosePlacement}
             layerVisibility={layerVisibility}
           />
         </div>
@@ -1364,12 +1416,13 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
         </aside>
       </section>
 
-        <TopicSettingsModal
+      <TopicSettingsModal
         open={commandSettingsOpen}
         title="Command Topic Settings"
         description="Edit the command topics used by the operator controls and save them locally."
         topics={commandTopicModalEntries}
         values={commandTopics}
+        previewRobotId={connectedRobotId}
         onClose={() => setCommandSettingsOpen(false)}
         onSave={(nextValues) => {
           setCommandTopics(sanitizeTopicRecord(defaultCommandTopics, nextValues));
@@ -1384,6 +1437,7 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
         description="Edit the viz topics bound to the Visualization list and save them locally."
         topics={displayTopicModalEntries}
         values={vizTopics}
+        previewRobotId={connectedRobotId}
         onClose={() => setVisualizationSettingsOpen(false)}
         onSave={(nextValues) => {
           const nextTopics = sanitizeTopicRecord(defaultVizTopics, nextValues);
