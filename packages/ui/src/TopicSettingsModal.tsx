@@ -1,4 +1,6 @@
-import { useEffect, useState, type FC } from "react";
+import { useEffect, useRef, useState, type FC } from "react";
+
+import { CloseIconButton } from "./components/CloseIconButton";
 
 export type TopicSettingDefinition = {
   key: string;
@@ -25,12 +27,31 @@ export const TopicSettingsModal: FC<TopicSettingsModalProps> = ({
   onSave,
 }) => {
   const [draftValues, setDraftValues] = useState<Record<string, string>>(values);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     if (open) {
       setDraftValues(values);
     }
   }, [open, values]);
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+
+      event.preventDefault();
+      closeButtonRef.current?.click();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [open]);
 
   if (!open) {
     return null;
@@ -44,9 +65,7 @@ export const TopicSettingsModal: FC<TopicSettingsModalProps> = ({
             <h3>{title}</h3>
             <p>{description}</p>
           </div>
-          <button type="button" className="rcs-ghost-button" onClick={onClose}>
-            Close
-          </button>
+          <CloseIconButton ref={closeButtonRef} onClick={onClose} />
         </div>
 
         <div className="rcs-modal__body">
@@ -71,10 +90,10 @@ export const TopicSettingsModal: FC<TopicSettingsModalProps> = ({
         <div className="rcs-modal__footer">
           <span>Saved locally and restored on next launch.</span>
           <div className="rcs-modal__actions">
-            <button type="button" className="rcs-ghost-button" onClick={onClose}>
+            <button type="button" className="rcs-button rcs-button--danger rcs-modal__action-button" onClick={onClose}>
               Cancel
             </button>
-            <button type="button" onClick={() => onSave(draftValues)}>
+            <button type="button" className="rcs-button rcs-button--success rcs-modal__action-button" onClick={() => onSave(draftValues)}>
               Save
             </button>
           </div>

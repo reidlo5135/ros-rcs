@@ -4,6 +4,12 @@ Changelog
 2026-04-10
 ----------
 
+- Started the ``0.1.1`` iteration:
+
+  - aligned the ``packages/ui/src/features/viz`` directory layout with the upstream-style ``layout``, ``panels``, ``scene``, ``hooks``, ``pages``, and ``styles`` slices
+  - moved the dashboard page entry under ``features/viz/pages/VizDashboardPage.tsx`` and kept ``packages/ui/src/index.tsx`` as a thin export surface
+  - added panel, topbar, scene wrapper, and hook placeholder files to prepare the next round of component-level extraction
+
 - Started the ``0.1.0`` planning branch:
 
   - defined the initial RCS product direction as a shared web core with an Electron desktop shell

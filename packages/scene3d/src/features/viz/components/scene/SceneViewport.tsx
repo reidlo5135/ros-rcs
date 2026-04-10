@@ -1773,8 +1773,19 @@ export function SceneViewport({ target, state, viewMode, layerVisibility, onRese
           <span>TF {(state.tf?.transforms.length ?? 0) + (state.tf_static?.transforms.length ?? 0)} frames</span>
         </div>
         <div className="rcs-toolbar-values">
-          <button type="button" className="rcs-ghost-button" onClick={onResetView}>
-            Refresh
+          <button
+            type="button"
+            className="rcs-scene-refresh-button"
+            aria-label="Reset scene view"
+            title="Reset scene view"
+            onClick={onResetView}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20 11a8 8 0 0 0-14.2-4.9" />
+              <path d="M4 4v4.8h4.8" />
+              <path d="M4 13a8 8 0 0 0 14.2 4.9" />
+              <path d="M20 20v-4.8h-4.8" />
+            </svg>
           </button>
         </div>
       </div>
