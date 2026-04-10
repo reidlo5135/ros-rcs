@@ -1,0 +1,15 @@
+{
+  "name": "@rcs/ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.tsx"
+  },
+  "dependencies": {
+    "@rcs/protocol": "0.1.0",
+    "@rcs/scene3d": "0.1.0",
+    "mqtt": "^5.10.4",
+    "react": "^18.3.1"
+  }
+}

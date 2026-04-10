@@ -1,0 +1,13 @@
+{
+  "name": "@rcs/scene3d",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.tsx"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "three": "^0.173.0"
+  }
+}

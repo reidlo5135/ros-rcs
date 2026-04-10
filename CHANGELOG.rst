@@ -1,0 +1,23 @@
+Changelog
+=========
+
+2026-04-10
+----------
+
+- Started the ``0.1.0`` planning branch:
+
+  - defined the initial RCS product direction as a shared web core with an Electron desktop shell
+  - documented the first MQTT/WS topic model for robot, simulation, and replay targets
+  - set the operator-console scope around 3D visualization, command flow, and session-oriented control
+
+- Documented the first simulation direction:
+
+  - scoped the simulator as a navigation-contract runtime instead of a full Gazebo replacement
+  - chose ``pgm + yaml`` world loading as the first environment model
+  - recorded TF, pose, scan, map, and costmap emulation as the required MVP outputs
+
+- Added the initial project planning documents:
+
+  - created the root ``README.md`` with architecture, MQTT model, and repository direction
+  - created ``TODO.md`` with roadmap, implementation phases, protocol design, and simulation design notes
+  - established this changelog as the baseline for future RCS milestones
