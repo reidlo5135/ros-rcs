@@ -37,10 +37,10 @@ export function Topbar({
             type="button"
             onClick={() => onViewModeChange("nav")}
           >
-            Nav
+            Navigation
           </button>
           <button
-            className={`rcs-tab${viewMode === "mapping" ? " rcs-tab--active" : ""}`}
+            className={`rcs-tab${viewMode === "mapping" ? " rcs-tab--active-mapping" : ""}`}
             type="button"
             onClick={() => onViewModeChange("mapping")}
           >

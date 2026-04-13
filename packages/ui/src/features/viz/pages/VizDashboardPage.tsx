@@ -1188,6 +1188,38 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
           }
           return;
         }
+        if (topic === `${navPrefix}/status` || topic === `${navPrefix.slice(1)}/status`) {
+          // ROS2 action GoalStatusArray – status codes:
+          //   2 = Executing  3 = Canceling  4 = Succeeded  5 = Canceled  6 = Aborted
+          const text = payload.toString("utf8").trim();
+          const rec = extractRecord(safeParseJsonPayload(text));
+          if (rec && Array.isArray(rec.status_list) && rec.status_list.length > 0) {
+            const latest = rec.status_list[rec.status_list.length - 1] as { status?: number };
+            const code = typeof latest.status === "number" ? latest.status : -1;
+            const GOAL_STATUS_LABEL: Record<number, string> = {
+              1: "Idle", 2: "Executing", 3: "Canceling", 4: "Succeeded", 5: "Canceled", 6: "Aborted",
+            };
+            const label = GOAL_STATUS_LABEL[code] ?? "Idle";
+            scheduleBridgePatch({
+              motion_status: {
+                ...(bridgeStateRef.current.motion_status ?? INITIAL_MOTION_STATUS),
+                goal_state: label,
+              },
+            });
+            // Auto-clear waypoints on terminal states (Canceled or Aborted)
+            if ((code === 5 || code === 6) && routeActiveRef.current) {
+              routeActiveRef.current = false;
+              if (autoClearTimerRef.current != null) clearTimeout(autoClearTimerRef.current);
+              autoClearTimerRef.current = setTimeout(() => {
+                autoClearTimerRef.current = null;
+                setRouteWaypoints([]);
+                setActiveGoalIndex(-1);
+                pushEvent(`Route ${label.toLowerCase()} – waypoints cleared automatically`);
+              }, 1500);
+            }
+          }
+          return;
+        }
         if (topic === `${navPrefix}/response` || topic === `${navPrefix.slice(1)}/response`) {
           const text = payload.toString("utf8").trim();
           const rec = extractRecord(safeParseJsonPayload(text));

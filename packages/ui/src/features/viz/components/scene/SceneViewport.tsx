@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
@@ -457,40 +457,44 @@ function buildArrowPoseMarker(
   group.position.set(goalMarker.x, 0, -goalMarker.y);
   group.rotation.y = -goalMarker.yaw;
 
+  // Arrow shaft – wider cylinder for bold visibility
   const tail = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.022, 0.022, 0.22, 20),
+    new THREE.CylinderGeometry(0.036, 0.036, 0.26, 10),
     new THREE.MeshBasicMaterial({ color: colors.accent, depthTest: false, depthWrite: false }),
   );
   tail.rotation.z = -Math.PI / 2;
-  tail.position.set(0.16, 0.06, 0);
+  tail.position.set(0.19, 0.065, 0);
   tail.renderOrder = 24;
 
+  // Arrowhead – 5-sided cone, larger and more distinct
   const head = new THREE.Mesh(
-    new THREE.ConeGeometry(0.07, 0.16, 3),
+    new THREE.ConeGeometry(0.10, 0.20, 5),
     new THREE.MeshBasicMaterial({ color: colors.primary, depthTest: false, depthWrite: false }),
   );
   head.rotation.x = Math.PI / 2;
   head.rotation.z = -Math.PI / 2;
-  head.position.set(0.36, 0.062, 0);
+  head.position.set(0.40, 0.065, 0);
   head.renderOrder = 25;
 
-  const fillRadius = options?.originFillRadius ?? 0.05;
-  const ringInner = options?.originRingInnerRadius ?? 0.06;
-  const ringOuter = options?.originRingOuterRadius ?? 0.082;
+  // Origin fill – larger base disc
+  const fillRadius = options?.originFillRadius ?? 0.072;
+  const ringInner = options?.originRingInnerRadius ?? 0.084;
+  const ringOuter = options?.originRingOuterRadius ?? 0.115;
   const origin = new THREE.Mesh(
-    new THREE.CircleGeometry(fillRadius, 24),
+    new THREE.CircleGeometry(fillRadius, 28),
     new THREE.MeshBasicMaterial({ color: colors.primary, depthTest: false, depthWrite: false }),
   );
   origin.rotation.x = -Math.PI / 2;
-  origin.position.y = 0.062;
+  origin.position.y = 0.065;
   origin.renderOrder = 24;
 
+  // Halo ring – wider for better readability at zoom
   const ring = new THREE.Mesh(
-    new THREE.RingGeometry(ringInner, ringOuter, 28),
+    new THREE.RingGeometry(ringInner, ringOuter, 32),
     new THREE.MeshBasicMaterial({ color: colors.accent, side: THREE.DoubleSide, depthTest: false, depthWrite: false }),
   );
   ring.rotation.x = -Math.PI / 2;
-  ring.position.y = 0.061;
+  ring.position.y = 0.064;
   ring.renderOrder = 23;
 
   group.add(tail, head, origin, ring);
@@ -499,12 +503,12 @@ function buildArrowPoseMarker(
 
 function buildGoalMarker(goalMarker: { x: number; y: number; yaw: number; kind: "goal" | "initial_pose" }) {
   return goalMarker.kind === "initial_pose"
-    ? buildArrowPoseMarker(goalMarker, { primary: "#2aa84a", accent: "#d9f7df" }, {
-      originFillRadius: 0.043,
-      originRingInnerRadius: 0.05,
-      originRingOuterRadius: 0.075,
+    ? buildArrowPoseMarker(goalMarker, { primary: "#20cc48", accent: "#70f090" }, {
+      originFillRadius: 0.060,
+      originRingInnerRadius: 0.072,
+      originRingOuterRadius: 0.108,
     })
-    : buildArrowPoseMarker(goalMarker, { primary: "#d62828", accent: "#ffe3e3" });
+    : buildArrowPoseMarker(goalMarker, { primary: "#f03030", accent: "#ff8888" });
 }
 
 function buildGridOutline(grid: OccupancyGridMessage, color: string, yOffset: number) {
@@ -553,12 +557,27 @@ function buildRobotPoseMarker(robotPose: Pose | undefined) {
   marker.position.set(robotPose.position.x, 0, -robotPose.position.y);
   marker.rotation.y = -robotPose.orientation.yaw;
 
-  const body = new THREE.Mesh(
-    new THREE.CircleGeometry(0.14, 28),
+  // Outer ring – gives the robot a distinct "target" look
+  const bodyRing = new THREE.Mesh(
+    new THREE.RingGeometry(0.145, 0.185, 32),
     new THREE.MeshBasicMaterial({
-      color: "#1c2a39",
+      color: "#3a607a",
+      side: THREE.DoubleSide,
+      depthTest: false,
+      depthWrite: false,
+    }),
+  );
+  bodyRing.rotation.x = -Math.PI / 2;
+  bodyRing.position.y = 0.071;
+  bodyRing.renderOrder = 43;
+
+  // Inner fill disc
+  const body = new THREE.Mesh(
+    new THREE.CircleGeometry(0.14, 32),
+    new THREE.MeshBasicMaterial({
+      color: "#1a2e42",
       transparent: true,
-      opacity: 0.92,
+      opacity: 0.94,
       depthTest: false,
       depthWrite: false,
     }),
@@ -567,16 +586,17 @@ function buildRobotPoseMarker(robotPose: Pose | undefined) {
   body.position.y = 0.07;
   body.renderOrder = 44;
 
+  // Heading indicator – 4-sided cone, brighter amber
   const heading = new THREE.Mesh(
-    new THREE.ConeGeometry(0.08, 0.2, 3),
-    new THREE.MeshBasicMaterial({ color: "#ffad33", depthTest: false, depthWrite: false }),
+    new THREE.ConeGeometry(0.09, 0.22, 4),
+    new THREE.MeshBasicMaterial({ color: "#e8a030", depthTest: false, depthWrite: false }),
   );
   heading.rotation.x = Math.PI / 2;
   heading.rotation.z = -Math.PI / 2;
-  heading.position.set(0.16, 0.075, 0);
+  heading.position.set(0.20, 0.075, 0);
   heading.renderOrder = 45;
 
-  marker.add(body, heading);
+  marker.add(bodyRing, body, heading);
   return marker;
 }
 
@@ -765,8 +785,9 @@ function SceneDataOverlay({ state, layerVisibility }: { state: BridgeState; laye
 
       {layerVisibility.robot && projectedRobot ? (
         <g>
-          <circle cx={projectedRobot.x} cy={projectedRobot.y} r="12" fill="#1c2a39" opacity="0.92" />
-          <line x1={projectedRobot.x} y1={projectedRobot.y} x2={headingX} y2={headingY} stroke="#ffad33" strokeWidth="4" strokeLinecap="round" />
+          <circle cx={projectedRobot.x} cy={projectedRobot.y} r="15" fill="none" stroke="#3a607a" strokeWidth="2.5" opacity="0.9" />
+          <circle cx={projectedRobot.x} cy={projectedRobot.y} r="11" fill="#1a2e42" opacity="0.94" />
+          <line x1={projectedRobot.x} y1={projectedRobot.y} x2={headingX} y2={headingY} stroke="#e8a030" strokeWidth="4.5" strokeLinecap="round" />
         </g>
       ) : null}
     </svg>
@@ -1568,6 +1589,17 @@ export function SceneViewport({
     start: THREE.Vector3;
   } | null>(null);
 
+  // Camera mode state – managed internally; "free" | "follow" | "fpv"
+  const [cameraMode, setCameraMode] = useState<"free" | "follow" | "fpv">("free");
+  const cameraModeRef = useRef<"free" | "follow" | "fpv">("free");
+  // Latest resolved robot pose – kept in a ref so camera-mode effects can access
+  // it without waiting for the next state update (fixes FPV on stationary robot).
+  const latestRobotPoseRef = useRef<Pose | undefined>(undefined);
+  // FPV look offsets (radians) accumulated via mouse drag, relative to robot heading
+  const fpvYawOffsetRef = useRef(0);
+  const fpvPitchOffsetRef = useRef(0);
+  const fpvDragRef = useRef<{ x: number; y: number } | null>(null);
+
   useEffect(() => {
     interactionModeRef.current = interactionMode;
   }, [interactionMode]);
@@ -1579,6 +1611,77 @@ export function SceneViewport({
   useEffect(() => {
     onPosePlacementRef.current = onPosePlacement;
   }, [onPosePlacement]);
+
+  // Sync cameraMode → ref and apply camera/controls side-effects immediately.
+  // Using latestRobotPoseRef so FPV activates even when robot is stationary
+  // (state doesn't change, so the render useEffect wouldn't re-run otherwise).
+  useEffect(() => {
+    cameraModeRef.current = cameraMode;
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    if (!camera || !controls) {
+      return;
+    }
+
+    if (cameraMode === "fpv") {
+      // Reset look offsets so we start from robot's current heading
+      fpvYawOffsetRef.current = 0;
+      fpvPitchOffsetRef.current = 0;
+      fpvDragRef.current = null;
+
+      camera.fov = 65;
+      camera.zoom = 1;
+      // Must set up BEFORE lookAt – top-down mode used (0,0,-1), FPV needs standard Y-up
+      camera.up.set(0, 1, 0);
+      camera.updateProjectionMatrix();
+
+      // Set grab cursor on canvas (drag-to-look)
+      if (rendererRef.current) {
+        rendererRef.current.domElement.style.cursor = "grab";
+      }
+
+      // Immediately place camera at the robot – don't wait for next state tick
+      const pose = latestRobotPoseRef.current;
+      if (pose) {
+        const eyeHeight = 0.5;
+        camera.position.set(pose.position.x, eyeHeight, -pose.position.y);
+        camera.lookAt(
+          pose.position.x + Math.cos(pose.orientation.yaw) * 10,
+          eyeHeight,
+          -(pose.position.y + Math.sin(pose.orientation.yaw) * 10),
+        );
+      }
+      renderRef.current?.();
+    } else {
+      fpvDragRef.current = null;
+
+      // Return from any camera mode: restore top-down overhead view
+      camera.fov = 14;
+      camera.zoom = 0.4;
+      // Restore the top-down up vector before controls takes over
+      camera.up.set(0, 0, -1);
+      camera.updateProjectionMatrix();
+      const t = controls.target.clone();
+      camera.position.set(t.x, 28, t.z + 0.001);
+      controls.update();
+
+      if (rendererRef.current) {
+        rendererRef.current.domElement.style.cursor = "grab";
+      }
+      renderRef.current?.();
+    }
+  }, [cameraMode]);
+
+  // Disable OrbitControls whenever the user is placing a pose OR in FPV mode.
+  // This runs the moment interactionMode / cameraMode changes, before any
+  // pointer event reaches OrbitControls – fixing the "camera drifts on drag" bug.
+  useEffect(() => {
+    const controls = controlsRef.current;
+    if (!controls) {
+      return;
+    }
+    controls.enabled = interactionMode === "idle" && cameraMode !== "fpv";
+  }, [interactionMode, cameraMode]);
 
   useEffect(() => {
     if (!viewportRef.current) {
@@ -1659,7 +1762,11 @@ export function SceneViewport({
     scene.add(robot);
 
     const renderScene = () => {
-      controls.update();
+      // OrbitControls damping must not run in FPV – it would pull the camera
+      // back toward its stored target and cause the "tilted right" drift.
+      if (cameraModeRef.current !== "fpv") {
+        controls.update();
+      }
       renderer.render(scene, camera);
     };
     renderRef.current = renderScene;
@@ -1716,7 +1823,41 @@ export function SceneViewport({
       renderScene();
     };
 
+    // ── FPV look helpers ──────────────────────────────────────────
+    const applyFpvLook = () => {
+      const pose = latestRobotPoseRef.current;
+      if (!pose) {
+        return;
+      }
+      const totalYaw = pose.orientation.yaw + fpvYawOffsetRef.current;
+      const pitch = fpvPitchOffsetRef.current;
+      const eyeHeight = 0.5;
+      const cos = Math.cos(pitch);
+      camera.up.set(0, 1, 0);
+      camera.position.set(pose.position.x, eyeHeight, -pose.position.y);
+      camera.lookAt(
+        pose.position.x + Math.cos(totalYaw) * cos * 10,
+        eyeHeight + Math.sin(pitch) * 10,
+        -(pose.position.y + Math.sin(totalYaw) * cos * 10),
+      );
+      renderScene();
+    };
+
+    // ── Pointer handlers ──────────────────────────────────────────
     const handlePointerDown = (event: PointerEvent) => {
+      // FPV mouse-look drag
+      if (cameraModeRef.current === "fpv" && event.button === 0) {
+        fpvDragRef.current = { x: event.clientX, y: event.clientY };
+        renderer.domElement.style.cursor = "grabbing";
+        event.preventDefault();
+        return;
+      }
+
+      // Default / Follow: show grabbing while OrbitControls drag is active
+      if (event.button === 0 && interactionModeRef.current === "idle") {
+        renderer.domElement.style.cursor = "grabbing";
+      }
+
       const currentMode = interactionModeRef.current;
       if ((currentMode !== "goal" && currentMode !== "initial_pose") || event.button !== 0) {
         return;
@@ -1727,7 +1868,6 @@ export function SceneViewport({
         return;
       }
 
-      controls.enabled = false;
       interactionStateRef.current = {
         mode: currentMode,
         start: point,
@@ -1737,6 +1877,25 @@ export function SceneViewport({
     };
 
     const handlePointerMove = (event: PointerEvent) => {
+      // FPV look: accumulate yaw/pitch from mouse delta
+      if (cameraModeRef.current === "fpv") {
+        if (!fpvDragRef.current) {
+          return;
+        }
+        const dx = event.clientX - fpvDragRef.current.x;
+        const dy = event.clientY - fpvDragRef.current.y;
+        fpvDragRef.current = { x: event.clientX, y: event.clientY };
+        // Sensitivity: ~0.003 rad/px feels like a standard FPS mouse speed
+        fpvYawOffsetRef.current -= dx * 0.003;
+        fpvPitchOffsetRef.current = Math.max(
+          -0.55,
+          Math.min(0.55, fpvPitchOffsetRef.current - dy * 0.003),
+        );
+        applyFpvLook();
+        event.preventDefault();
+        return;
+      }
+
       if (!interactionStateRef.current) {
         return;
       }
@@ -1751,6 +1910,19 @@ export function SceneViewport({
     };
 
     const handlePointerUp = (event: PointerEvent) => {
+      // FPV drag end – restore grab cursor
+      if (cameraModeRef.current === "fpv") {
+        fpvDragRef.current = null;
+        renderer.domElement.style.cursor = "grab";
+        event.preventDefault();
+        return;
+      }
+
+      // Default / Follow: restore grab cursor after OrbitControls drag
+      if (interactionModeRef.current === "idle") {
+        renderer.domElement.style.cursor = "grab";
+      }
+
       if (!interactionStateRef.current) {
         return;
       }
@@ -1758,7 +1930,6 @@ export function SceneViewport({
       const point = readGroundPoint(event) ?? interactionStateRef.current.start;
       const { mode, start } = interactionStateRef.current;
       interactionStateRef.current = null;
-      controls.enabled = true;
       clearPreview();
 
       const dx = point.x - start.x;
@@ -1771,10 +1942,21 @@ export function SceneViewport({
 
     const handleContextMenu = (event: Event) => event.preventDefault();
 
+    const handleWheel = (event: WheelEvent) => {
+      if (cameraModeRef.current !== "fpv") return;
+      // FOV-based zoom: scroll up → narrower FOV (zoom in), scroll down → wider (zoom out)
+      const delta = event.deltaY > 0 ? 1 : -1;
+      camera.fov = Math.max(10, Math.min(100, camera.fov + delta * 2));
+      camera.updateProjectionMatrix();
+      renderScene();
+      event.preventDefault();
+    };
+
     renderer.domElement.addEventListener("pointerdown", handlePointerDown);
     window.addEventListener("pointermove", handlePointerMove);
     window.addEventListener("pointerup", handlePointerUp);
     renderer.domElement.addEventListener("contextmenu", handleContextMenu);
+    renderer.domElement.addEventListener("wheel", handleWheel, { passive: false });
 
     sceneRef.current = scene;
     rendererRef.current = renderer;
@@ -1785,12 +1967,13 @@ export function SceneViewport({
 
     return () => {
       clearPreview();
-      controls.enabled = true;
+      controls.enabled = true; // always restore on unmount
       observer.disconnect();
       renderer.domElement.removeEventListener("pointerdown", handlePointerDown);
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
       renderer.domElement.removeEventListener("contextmenu", handleContextMenu);
+      renderer.domElement.removeEventListener("wheel", handleWheel);
       window.removeEventListener("resize", resize);
       renderRef.current = null;
       controls.dispose();
@@ -1833,6 +2016,9 @@ export function SceneViewport({
       state.robot_pose,
       state.robot_description?.data,
     );
+    // Keep ref in sync so camera-mode effects can read the pose immediately
+    latestRobotPoseRef.current = robotPose ?? undefined;
+
     if (gridRef.current) {
       gridRef.current.visible = layerVisibility.grid;
     }
@@ -1926,16 +2112,16 @@ export function SceneViewport({
       if (routeWaypoints && routeWaypoints.length > 0) {
         const group = new THREE.Group();
 
-        // polyline connecting waypoints
+        // Connecting polyline – teal/cyan, distinct from waypoint color
         if (routeWaypoints.length >= 2) {
           const linePoints = routeWaypoints.map((wp) => new THREE.Vector3(wp.x, 0.07, -wp.y));
           const lineGeom = new THREE.BufferGeometry().setFromPoints(linePoints);
           const line = new THREE.Line(
             lineGeom,
             new THREE.LineBasicMaterial({
-              color: "#f57c00",
+              color: "#26c8d8",
               transparent: true,
-              opacity: 0.72,
+              opacity: 0.65,
               depthTest: false,
               depthWrite: false,
             }),
@@ -1944,8 +2130,9 @@ export function SceneViewport({
           group.add(line);
         }
 
+        // Waypoint markers – warm amber, distinct from goal (red) and initial pose (green)
         for (const wp of routeWaypoints) {
-          group.add(buildArrowPoseMarker(wp, { primary: "#f57c00", accent: "#fff3e0" }));
+          group.add(buildArrowPoseMarker(wp, { primary: "#e89030", accent: "#ffc060" }));
         }
         routeMarkersGroupRef.current = group;
         scene.add(group);
@@ -2154,6 +2341,34 @@ export function SceneViewport({
       }
     }
 
+    // ── Camera mode: apply per-frame positioning before final render ──
+    const camMode = cameraModeRef.current;
+    if (camMode === "follow" && robotPose && camera && controls) {
+      // Translate camera + target together to keep the same orbital offset,
+      // so zoom / tilt the user has set is preserved.
+      const offsetX = camera.position.x - controls.target.x;
+      const offsetZ = camera.position.z - controls.target.z;
+      const tx = robotPose.position.x;
+      const tz = -robotPose.position.y;
+      controls.target.set(tx, 0, tz);
+      camera.position.x = tx + offsetX;
+      camera.position.z = tz + offsetZ;
+      controls.update();
+    } else if (camMode === "fpv" && robotPose && camera) {
+      const totalYaw = robotPose.orientation.yaw + fpvYawOffsetRef.current;
+      const pitch = fpvPitchOffsetRef.current;
+      const eyeHeight = 0.5;
+      const cos = Math.cos(pitch);
+      camera.up.set(0, 1, 0);
+      camera.position.set(robotPose.position.x, eyeHeight, -robotPose.position.y);
+      camera.lookAt(
+        robotPose.position.x + Math.cos(totalYaw) * cos * 10,
+        eyeHeight + Math.sin(pitch) * 10,
+        -(robotPose.position.y + Math.sin(totalYaw) * cos * 10),
+      );
+      camera.updateProjectionMatrix();
+    }
+
     renderRef.current?.();
   }, [goalMarker, layerVisibility, routeWaypoints, state, viewMode]);
 
@@ -2179,6 +2394,9 @@ export function SceneViewport({
     camera.position.y = 28;
     camera.position.z = -(centerY + 0.001);
     camera.zoom = 0.4;
+    camera.fov = 14;
+    // Ensure up vector is correct for top-down view (FPV may have changed it)
+    camera.up.set(0, 0, -1);
     camera.updateProjectionMatrix();
     if (controls) {
       controls.target.set(centerX, 0, -centerY);
@@ -2202,22 +2420,50 @@ export function SceneViewport({
       <div className="rcs-scene-panel__toolbar">
         <div className="rcs-scene-panel__toolbar-main">
           <strong>Scene</strong>
-          <span>Background: 228; 228; 228</span>
           <span>Map {state.map ? `${state.map.info.width}x${state.map.info.height}` : "--"}</span>
-          <span>Raw --</span>
-          <span>Refined --</span>
           <span>Global {state.global_path?.poses.length ?? 0} pts</span>
           <span>Local {state.local_path?.poses.length ?? 0} pts</span>
           <span>Scan {state.scan?.ranges.length ?? state.scan?.points?.length ?? 0} rays</span>
           <span>TF {(state.tf?.transforms.length ?? 0) + (state.tf_static?.transforms.length ?? 0)} frames</span>
         </div>
         <div className="rcs-toolbar-values">
+          {/* Follow Robot – top-down camera tracks robot position */}
+          <button
+            type="button"
+            className={`rcs-scene-cam-button${cameraMode === "follow" ? " rcs-scene-cam-button--active" : ""}`}
+            aria-label="Follow robot (global view)"
+            title="Follow Robot"
+            onClick={() => setCameraMode((m) => (m === "follow" ? "free" : "follow"))}
+          >
+            {/* Crosshair / target icon */}
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="7" />
+              <circle cx="12" cy="12" r="2" />
+              <path d="M12 2v4M12 18v4M2 12h4M18 12h4" />
+            </svg>
+          </button>
+          {/* FPV – camera at robot eye level, looking forward */}
+          <button
+            type="button"
+            className={`rcs-scene-cam-button${cameraMode === "fpv" ? " rcs-scene-cam-button--active" : ""}`}
+            aria-label="First-person view"
+            title="First-person View"
+            onClick={() => setCameraMode((m) => (m === "fpv" ? "free" : "fpv"))}
+          >
+            {/* Eye / FPV icon */}
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z" />
+              <circle cx="12" cy="12" r="3" />
+              <path d="M12 9v-3M12 18v-3M9 12H6M18 12h-3" />
+            </svg>
+          </button>
+          {/* Reset view */}
           <button
             type="button"
             className="rcs-scene-refresh-button"
             aria-label="Reset scene view"
             title="Reset scene view"
-            onClick={onResetView}
+            onClick={() => { setCameraMode("free"); onResetView?.(); }}
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M20 11a8 8 0 0 0-14.2-4.9" />
