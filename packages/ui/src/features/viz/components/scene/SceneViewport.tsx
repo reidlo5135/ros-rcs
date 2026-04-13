@@ -911,9 +911,7 @@ function interpolateChannel(start: number, end: number, ratio: number) {
   return Math.round(start + ((end - start) * ratio));
 }
 
-// Fills an RGBA Uint8Array (row-major, y=0 at bottom for DataTexture) with
-// occupancy grid colours.  Extracted so the same logic can be used for both
-// first-time allocation and in-place refresh.
+// Fills an RGBA Uint8Array for a DataTexture (flipY=true, so row-0 = top of grid).
 function fillOccupancyPixels(
   rgba: Uint8Array,
   grid: OccupancyGridMessage,
@@ -922,8 +920,7 @@ function fillOccupancyPixels(
   const { width, height } = grid.info;
   for (let row = 0; row < height; row += 1) {
     for (let col = 0; col < width; col += 1) {
-      // DataTexture row-0 = bottom of texture, so read grid rows in reverse
-      const sourceIndex = ((height - 1 - row) * width) + col;
+      const sourceIndex = (row * width) + col;
       const targetIndex = ((row * width) + col) * 4;
       const value = grid.data[sourceIndex] ?? -1;
       let red = 0;
@@ -989,7 +986,6 @@ function buildOccupancyTexture(
   texture.magFilter = THREE.NearestFilter;
   texture.minFilter = THREE.NearestFilter;
   texture.generateMipmaps = false;
-  // DataTexture default flipY=false; row-0 is already at bottom (see fillOccupancyPixels)
   texture.flipY = false;
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.needsUpdate = true;
