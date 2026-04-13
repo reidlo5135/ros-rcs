@@ -1,32 +1,39 @@
 import { SettingsIconButton } from "../SettingsIconButton";
 
+type GoalWaypoint = {
+  x: number;
+  y: number;
+  yaw: number;
+};
+
 type CommandPanelProps = {
-  goalX: string;
-  goalY: string;
-  goalYaw: string;
   poseInteractionMode: "idle" | "goal" | "initial_pose";
-  onGoalXChange: (value: string) => void;
-  onGoalYChange: (value: string) => void;
-  onGoalYawChange: (value: string) => void;
-  onSend: () => void;
-  onCancel: () => void;
-  onSetInitialPose: () => void;
   onOpenSettings: () => void;
+  onSetInitialPose: () => void;
+  routeWaypoints: ReadonlyArray<GoalWaypoint>;
+  /** 0-based index of the goal currently being executed. -1 = not started. */
+  activeGoalIndex: number;
+  onAddWaypoint: () => void;
+  onRemoveWaypoint: (index: number) => void;
+  onClearWaypoints: () => void;
+  onSendRoute: () => void;
+  onCancelRoute: () => void;
 };
 
 export function CommandPanel({
-  goalX,
-  goalY,
-  goalYaw,
   poseInteractionMode,
-  onGoalXChange,
-  onGoalYChange,
-  onGoalYawChange,
-  onSend,
-  onCancel,
-  onSetInitialPose,
   onOpenSettings,
+  onSetInitialPose,
+  routeWaypoints,
+  activeGoalIndex,
+  onAddWaypoint,
+  onRemoveWaypoint,
+  onClearWaypoints,
+  onSendRoute,
+  onCancelRoute,
 }: CommandPanelProps) {
+  const isAddingWaypoint = poseInteractionMode === "goal";
+
   return (
     <section className="rcs-card">
       <div className="rcs-card__header">
@@ -34,39 +41,83 @@ export function CommandPanel({
         <SettingsIconButton label="Open Command topic settings" onClick={onOpenSettings} />
       </div>
 
-      <div className="rcs-form-grid">
-        <label className="rcs-field">
-          <span>X</span>
-          <input value={goalX} onChange={(event) => onGoalXChange(event.target.value)} />
-        </label>
-        <label className="rcs-field">
-          <span>Y</span>
-          <input value={goalY} onChange={(event) => onGoalYChange(event.target.value)} />
-        </label>
-        <label className="rcs-field">
-          <span>Yaw</span>
-          <input value={goalYaw} onChange={(event) => onGoalYawChange(event.target.value)} />
-        </label>
+      {routeWaypoints.length > 0 && (
+        <ol className="rcs-waypoint-list">
+          {routeWaypoints.map((wp, index) => (
+            <li
+              key={index}
+              className={`rcs-waypoint-item${
+                index < activeGoalIndex
+                  ? " rcs-waypoint-item--completed"
+                  : index === activeGoalIndex
+                  ? " rcs-waypoint-item--active"
+                  : ""
+              }`}
+            >
+              <span className="rcs-waypoint-index">
+                {index < activeGoalIndex ? "✓" : index === activeGoalIndex ? "●" : index + 1}
+              </span>
+              <span className="rcs-waypoint-coords">
+                <span className="rcs-waypoint-label">x</span>{wp.x.toFixed(2)}
+                <span className="rcs-waypoint-label">y</span>{wp.y.toFixed(2)}
+                <span className="rcs-waypoint-label">yaw</span>{wp.yaw.toFixed(2)}
+              </span>
+              <button
+                className="rcs-waypoint-remove"
+                type="button"
+                onClick={() => onRemoveWaypoint(index)}
+                aria-label={`Remove waypoint ${index + 1}`}
+              >
+                ×
+              </button>
+            </li>
+          ))}
+        </ol>
+      )}
+
+      <button
+        className={`rcs-button rcs-button--wide rcs-button--add${isAddingWaypoint ? " rcs-button--armed-goal" : ""}`}
+        type="button"
+        onClick={onAddWaypoint}
+      >
+        {isAddingWaypoint ? (
+          <><span className="rcs-pulse-dot" aria-hidden="true">●</span>{" "}Placing…</>
+        ) : (
+          "+ Add Waypoint"
+        )}
+      </button>
+
+      <div className="rcs-button-row rcs-button-row--split">
+        <button
+          className="rcs-button rcs-button--success"
+          type="button"
+          disabled={routeWaypoints.length === 0}
+          onClick={onSendRoute}
+        >
+          Send
+        </button>
+        <button className="rcs-button rcs-button--danger" type="button" onClick={onCancelRoute}>
+          Cancel
+        </button>
       </div>
 
       <div className="rcs-button-row rcs-button-row--split">
         <button
-          className={`rcs-button rcs-button--neutral ${poseInteractionMode === "goal" ? "rcs-button--armed-goal" : ""}`}
+          className="rcs-button rcs-button--neutral"
           type="button"
-          onClick={onSend}
+          disabled={routeWaypoints.length === 0}
+          onClick={onClearWaypoints}
         >
-          Send
+          Clear
         </button>
-        <button className="rcs-button rcs-button--danger" type="button" onClick={onCancel}>Cancel</button>
+        <button
+          className={`rcs-button rcs-button--teal-soft ${poseInteractionMode === "initial_pose" ? "rcs-button--armed-initial" : ""}`}
+          type="button"
+          onClick={onSetInitialPose}
+        >
+          Init Pose
+        </button>
       </div>
-
-      <button
-        className={`rcs-button rcs-button--wide rcs-button--teal-soft ${poseInteractionMode === "initial_pose" ? "rcs-button--armed-initial" : ""}`}
-        type="button"
-        onClick={onSetInitialPose}
-      >
-        Set Initial Pose
-      </button>
     </section>
   );
 }

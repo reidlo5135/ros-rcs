@@ -38,6 +38,8 @@ export const vizTopicDefinitions = [
 export const commandTopicDefinitions = [
   { key: "navigateToPose", label: "Navigate To Pose", defaultTopic: "/amr/command/navigate_to_pose" },
   { key: "cancelNavigateToPose", label: "Cancel Navigate To Pose", defaultTopic: "/amr/command/cancel_navigate_to_pose" },
+  { key: "navigateToPoses", label: "Navigate To Poses", defaultTopic: "/amr/command/navigate_to_poses" },
+  { key: "cancelNavigateToPoses", label: "Cancel Navigate To Poses", defaultTopic: "/amr/command/cancel_navigate_to_poses" },
   { key: "setInitialPose", label: "Set Initial Pose", defaultTopic: "/amr/command/set_initial_pose" },
 ] as const;
 

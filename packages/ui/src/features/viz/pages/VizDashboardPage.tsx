@@ -23,6 +23,8 @@ import {
   type BridgeState,
   type LaserScanMessage,
   type MotionStatusMessage,
+  type NavigateToPosesFeedbackMessage,
+  type NavigateToPosesResponseMessage,
   type OccupancyGridMessage,
   type PathMessage,
   type Pose,
@@ -810,6 +812,8 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
   const [goalX, setGoalX] = useState("2.5");
   const [goalY, setGoalY] = useState("0.0");
   const [goalYaw, setGoalYaw] = useState("0.0");
+  const [routeWaypoints, setRouteWaypoints] = useState<ReadonlyArray<{ x: number; y: number; yaw: number }>>([]);
+  const [activeGoalIndex, setActiveGoalIndex] = useState(-1);
   const [poseInteractionMode, setPoseInteractionMode] = useState<PoseInteractionMode>("idle");
   const [sceneGoalMarker, setSceneGoalMarker] = useState<{
     x: number;
@@ -846,6 +850,8 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
   const robotIdRef = useRef(robotId);
   const pendingBridgePatchRef = useRef<Partial<BridgeState>>({});
   const flushBridgeFrameRef = useRef<number | null>(null);
+  const routeActiveRef = useRef(false);
+  const autoClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activePingRequestIdRef = useRef<string | null>(null);
   const lastPingSentAtRef = useRef<number | null>(null);
   const modeLabel: ViewMode = viewMode === "nav" ? "navigation" : "mapping";
@@ -970,6 +976,12 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
   };
 
   const handlePosePlacement = (mode: "goal" | "initial_pose", x: number, y: number, yaw: number) => {
+    if (mode === "goal") {
+      setRouteWaypoints((current) => [...current, { x, y, yaw }]);
+      pushEvent(`Waypoint added: (${x.toFixed(2)}, ${y.toFixed(2)}, ${yaw.toFixed(2)})`);
+      return;
+    }
+
     setPoseInteractionMode("idle");
     setSceneGoalMarker({
       x,
@@ -977,22 +989,6 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
       yaw,
       kind: mode,
     });
-
-    if (mode === "goal") {
-      publishCommand(commandTopics.navigateToPose, {
-        request_id: createCommandId(),
-        goal_pose: {
-          header: {
-            frame_id: "map",
-          },
-          pose: {
-            position: { x, y, z: 0 },
-            orientation: createQuaternionFromYaw(yaw),
-          },
-        },
-      }, "Navigate To Pose");
-      return;
-    }
 
     publishCommand(commandTopics.setInitialPose, {
       request_id: createCommandId(),
@@ -1003,6 +999,45 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
       },
     }, "Set Initial Pose");
   };
+
+  const handleSendRoute = () => {
+    if (routeWaypoints.length === 0) {
+      return;
+    }
+
+    publishCommand(commandTopics.navigateToPoses, {
+      request_id: createCommandId(),
+      goal_poses: routeWaypoints.map(({ x, y, yaw }) => ({
+        header: { frame_id: "map" },
+        pose: {
+          position: { x, y, z: 0 },
+          orientation: createQuaternionFromYaw(yaw),
+        },
+      })),
+    }, "Navigate To Poses");
+    setActiveGoalIndex(-1);
+    routeActiveRef.current = true;
+    setPoseInteractionMode("idle");
+  };
+
+  useEffect(() => {
+    if (
+      routeActiveRef.current &&
+      routeWaypoints.length > 0 &&
+      activeGoalIndex >= routeWaypoints.length
+    ) {
+      routeActiveRef.current = false;
+      if (autoClearTimerRef.current != null) {
+        clearTimeout(autoClearTimerRef.current);
+      }
+      autoClearTimerRef.current = setTimeout(() => {
+        autoClearTimerRef.current = null;
+        setRouteWaypoints([]);
+        setActiveGoalIndex(-1);
+        pushEvent("Route completed – waypoints cleared automatically");
+      }, 1500);
+    }
+  }, [activeGoalIndex, routeWaypoints.length]);
 
   const syncVizSubscriptions = (
     previousTopics: TopicRecord<VizTopicKey>,
@@ -1135,6 +1170,36 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
           activePingRequestIdRef.current = null;
         }
         return;
+      }
+
+      // navigate_to_poses sub-topics (feedback / status / response)
+      // These arrive under /amr/{id}/viz/navigate_to_poses/* via the wildcard subscription.
+      // They don't have a vizTopicDefinition entry so we handle them before findMatchingVizKey.
+      {
+        const navPrefix = `/amr/${robotId.trim() || "robot1"}/viz/navigate_to_poses`;
+        if (topic === `${navPrefix}/feedback` || topic === `${navPrefix.slice(1)}/feedback`) {
+          if (routeActiveRef.current) {
+            const text = payload.toString("utf8").trim();
+            const rec = extractRecord(safeParseJsonPayload(text));
+            if (rec && typeof rec.current_goal_index === "number") {
+              const fb = rec as NavigateToPosesFeedbackMessage;
+              setActiveGoalIndex(fb.current_goal_index);
+            }
+          }
+          return;
+        }
+        if (topic === `${navPrefix}/response` || topic === `${navPrefix.slice(1)}/response`) {
+          const text = payload.toString("utf8").trim();
+          const rec = extractRecord(safeParseJsonPayload(text));
+          if (rec && routeActiveRef.current) {
+            const res = rec as NavigateToPosesResponseMessage;
+            if (res.completed) {
+              // Mark all waypoints as done, then auto-clear via useEffect
+              setActiveGoalIndex(res.completed_goals ?? Number.MAX_SAFE_INTEGER);
+            }
+          }
+          return;
+        }
       }
 
       const matchingKey = findMatchingVizKey(topic, vizTopicsRef.current);
@@ -1355,34 +1420,37 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
           />
 
           <CommandPanel
-            goalX={goalX}
-            goalY={goalY}
-            goalYaw={goalYaw}
             poseInteractionMode={poseInteractionMode}
-            onGoalXChange={setGoalX}
-            onGoalYChange={setGoalY}
-            onGoalYawChange={setGoalYaw}
-            onSend={() => {
+            routeWaypoints={routeWaypoints}
+            activeGoalIndex={activeGoalIndex}
+            onAddWaypoint={() => {
               setPoseInteractionMode((current) => {
-                const nextMode = current === "goal" ? "idle" : "goal";
-                if (nextMode === "goal") {
-                  setSceneGoalMarker(null);
-                  pushEvent("Navigate To Pose armed: drag on the map to place a goal");
+                if (current === "goal") {
+                  return "idle";
                 }
-                return nextMode;
+                pushEvent("Route mode: drag on the map to place waypoints");
+                return "goal";
               });
             }}
-            onCancel={() => {
-              const wasInitialPoseMode = poseInteractionMode === "initial_pose";
+            onRemoveWaypoint={(index) => {
+              setRouteWaypoints((current) => current.filter((_, i) => i !== index));
+            }}
+            onClearWaypoints={() => {
+              if (autoClearTimerRef.current != null) { clearTimeout(autoClearTimerRef.current); autoClearTimerRef.current = null; }
+              routeActiveRef.current = false;
+              setActiveGoalIndex(-1);
+              setRouteWaypoints([]);
+              pushEvent("Route waypoints cleared");
+            }}
+            onSendRoute={handleSendRoute}
+            onCancelRoute={() => {
+              if (autoClearTimerRef.current != null) { clearTimeout(autoClearTimerRef.current); autoClearTimerRef.current = null; }
+              routeActiveRef.current = false;
+              setActiveGoalIndex(-1);
               setPoseInteractionMode("idle");
-              setSceneGoalMarker(null);
-              if (wasInitialPoseMode) {
-                pushEvent("Initial pose placement canceled");
-                return;
-              }
-              publishCommand(commandTopics.cancelNavigateToPose, {
+              publishCommand(commandTopics.cancelNavigateToPoses, {
                 request_id: createCommandId(),
-              }, "Cancel Navigate To Pose");
+              }, "Cancel Navigate To Poses");
             }}
             onSetInitialPose={() => {
               setPoseInteractionMode((current) => {
@@ -1420,6 +1488,7 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
             interactionMode={poseInteractionMode}
             onPoseSelection={handlePoseSelection}
             onPosePlacement={handlePosePlacement}
+            routeWaypoints={routeWaypoints}
             layerVisibility={layerVisibility}
           />
         </div>

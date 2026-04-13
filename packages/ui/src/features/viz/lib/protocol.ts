@@ -95,6 +95,23 @@ export type BatteryStateMessage = {
   };
 };
 
+export type NavigateToPosesFeedbackMessage = {
+  goal_id?: string;
+  current_goal_index: number;
+  goal_count: number;
+  distance_remaining?: number;
+  number_of_recoveries?: number;
+};
+
+export type NavigateToPosesResponseMessage = {
+  request_id?: string;
+  success?: boolean;
+  accepted?: boolean;
+  completed?: boolean;
+  completed_goals?: number;
+  message?: string;
+};
+
 export type BridgeState = {
   map?: OccupancyGridMessage;
   global_costmap?: OccupancyGridMessage;
@@ -108,6 +125,8 @@ export type BridgeState = {
   tf_static?: TfMessage;
   robot_description?: RobotDescriptionMessage;
   battery_state?: BatteryStateMessage;
+  nav_to_poses_feedback?: NavigateToPosesFeedbackMessage;
+  nav_to_poses_response?: NavigateToPosesResponseMessage;
 };
 
 export type ViewMode = "navigation" | "mapping";

@@ -435,14 +435,26 @@ input:not([type="checkbox"]) {
   border: 1px solid rgba(45, 138, 64, 0.34);
 }
 
+.rcs-button--add {
+  background: #e8f0fe;
+  color: #1a3d8f;
+  border: 1px solid rgba(44, 82, 200, 0.3);
+}
+
 .rcs-button--wide {
   width: 100%;
+}
+
+@keyframes rcs-armed-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
 }
 
 .rcs-button--armed-goal {
   background: #ffd88f;
   border-color: #2f2f2f;
   box-shadow: inset 0 0 0 1px rgba(47, 47, 47, 0.45);
+  animation: rcs-armed-pulse 1.2s ease-in-out infinite;
 }
 
 .rcs-button--armed-initial {
@@ -952,4 +964,123 @@ input:not([type="checkbox"]) {
     align-items: flex-start;
     flex-direction: column;
   }
+}
+
+.rcs-waypoint-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.rcs-waypoint-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 3px 5px;
+  min-height: 22px;
+}
+
+.rcs-waypoint-index {
+  flex: 0 0 14px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #f57c00;
+  text-align: center;
+}
+
+.rcs-waypoint-coords {
+  flex: 1 1 auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+}
+
+.rcs-waypoint-label {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+  margin-left: 4px;
+}
+
+.rcs-waypoint-label:first-child {
+  margin-left: 0;
+}
+
+.rcs-waypoint-item--completed {
+  background: #e6f4ea;
+  border-color: rgba(45, 138, 64, 0.35);
+}
+
+.rcs-waypoint-item--completed .rcs-waypoint-index {
+  color: #1e6a2d;
+}
+
+.rcs-waypoint-item--completed .rcs-waypoint-coords {
+  color: #2d6a35;
+  opacity: 0.75;
+}
+
+.rcs-waypoint-item--active {
+  background: #fff8e1;
+  border-color: #f57c00;
+  animation: rcs-armed-pulse 1.2s ease-in-out infinite;
+}
+
+.rcs-waypoint-item--active .rcs-waypoint-index {
+  color: #e65100;
+}
+
+.rcs-waypoint-remove {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  line-height: 1;
+  font-size: 14px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.rcs-waypoint-remove:hover {
+  background: var(--danger);
+  color: #7a2222;
+  border-color: rgba(166, 54, 54, 0.3);
+}
+
+.rcs-waypoint-count {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #f57c00;
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  letter-spacing: 0.02em;
+}
+
+.rcs-pulse-dot {
+  font-size: 7px;
+  vertical-align: middle;
+  margin-right: 1px;
 }

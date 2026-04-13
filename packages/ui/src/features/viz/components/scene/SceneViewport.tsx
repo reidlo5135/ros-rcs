@@ -28,6 +28,7 @@ type SceneViewportProps = {
   interactionMode?: "idle" | "goal" | "initial_pose";
   onPoseSelection?: (x: number, y: number, yaw: number) => void;
   onPosePlacement?: (mode: "goal" | "initial_pose", x: number, y: number, yaw: number) => void;
+  routeWaypoints?: ReadonlyArray<{ x: number; y: number; yaw: number }>;
   layerVisibility: {
     grid: boolean;
     map: boolean;
@@ -1500,6 +1501,7 @@ export function SceneViewport({
   interactionMode = "idle",
   onPoseSelection,
   onPosePlacement,
+  routeWaypoints,
 }: SceneViewportProps) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -1524,6 +1526,7 @@ export function SceneViewport({
   const scanRef = useRef<THREE.Points | null>(null);
   const tfGroupRef = useRef<THREE.Group | null>(null);
   const goalMarkerRef = useRef<THREE.Group | null>(null);
+  const routeMarkersGroupRef = useRef<THREE.Group | null>(null);
   const previewMarkerRef = useRef<THREE.Group | null>(null);
   const lastCenteredMapSignatureRef = useRef("");
   const previousRobotInputsRef = useRef<{
@@ -1556,6 +1559,7 @@ export function SceneViewport({
     robotPose?: BridgeState["robot_pose"];
   }>({});
   const previousGoalMarkerRef = useRef<SceneViewportProps["goalMarker"]>(null);
+  const previousRouteWaypointsRef = useRef<SceneViewportProps["routeWaypoints"]>(undefined);
   const interactionModeRef = useRef<SceneViewportProps["interactionMode"]>("idle");
   const onPoseSelectionRef = useRef<SceneViewportProps["onPoseSelection"]>(undefined);
   const onPosePlacementRef = useRef<SceneViewportProps["onPosePlacement"]>(undefined);
@@ -1804,6 +1808,7 @@ export function SceneViewport({
       disposeObject(scanRef.current);
       disposeObject(tfGroupRef.current);
       disposeObject(goalMarkerRef.current);
+      disposeObject(routeMarkersGroupRef.current);
       disposeObject(previewMarkerRef.current);
       disposeObject(robotMarkerRef.current);
       disposeObject(robot);
@@ -1910,6 +1915,42 @@ export function SceneViewport({
         scene.add(goalMarkerRef.current);
       }
       previousGoalMarkerRef.current = goalMarker;
+    }
+
+    if (previousRouteWaypointsRef.current !== routeWaypoints) {
+      if (routeMarkersGroupRef.current) {
+        scene.remove(routeMarkersGroupRef.current);
+        disposeObject(routeMarkersGroupRef.current);
+        routeMarkersGroupRef.current = null;
+      }
+      if (routeWaypoints && routeWaypoints.length > 0) {
+        const group = new THREE.Group();
+
+        // polyline connecting waypoints
+        if (routeWaypoints.length >= 2) {
+          const linePoints = routeWaypoints.map((wp) => new THREE.Vector3(wp.x, 0.07, -wp.y));
+          const lineGeom = new THREE.BufferGeometry().setFromPoints(linePoints);
+          const line = new THREE.Line(
+            lineGeom,
+            new THREE.LineBasicMaterial({
+              color: "#f57c00",
+              transparent: true,
+              opacity: 0.72,
+              depthTest: false,
+              depthWrite: false,
+            }),
+          );
+          line.renderOrder = 22;
+          group.add(line);
+        }
+
+        for (const wp of routeWaypoints) {
+          group.add(buildArrowPoseMarker(wp, { primary: "#f57c00", accent: "#fff3e0" }));
+        }
+        routeMarkersGroupRef.current = group;
+        scene.add(group);
+      }
+      previousRouteWaypointsRef.current = routeWaypoints;
     }
 
     for (const [ref, outlineRef, grid, palette, yOffset] of [
@@ -2114,7 +2155,7 @@ export function SceneViewport({
     }
 
     renderRef.current?.();
-  }, [goalMarker, layerVisibility, state, viewMode]);
+  }, [goalMarker, layerVisibility, routeWaypoints, state, viewMode]);
 
   useEffect(() => {
     const camera = cameraRef.current;
