@@ -911,26 +911,18 @@ function interpolateChannel(start: number, end: number, ratio: number) {
   return Math.round(start + ((end - start) * ratio));
 }
 
-function buildOccupancyTexture(
+// Fills an RGBA Uint8Array (row-major, y=0 at bottom for DataTexture) with
+// occupancy grid colours.  Extracted so the same logic can be used for both
+// first-time allocation and in-place refresh.
+function fillOccupancyPixels(
+  rgba: Uint8Array,
   grid: OccupancyGridMessage,
   palette: "map" | "global_costmap" | "local_costmap",
 ) {
   const { width, height } = grid.info;
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const context = canvas.getContext("2d");
-  if (!context) {
-    const texture = new THREE.Texture();
-    texture.needsUpdate = true;
-    return texture;
-  }
-
-  const imageData = context.createImageData(width, height);
-  const rgba = imageData.data;
-
   for (let row = 0; row < height; row += 1) {
     for (let col = 0; col < width; col += 1) {
+      // DataTexture row-0 = bottom of texture, so read grid rows in reverse
       const sourceIndex = ((height - 1 - row) * width) + col;
       const targetIndex = ((row * width) + col) * 4;
       const value = grid.data[sourceIndex] ?? -1;
@@ -941,20 +933,11 @@ function buildOccupancyTexture(
 
       if (palette === "map") {
         if (value < 0) {
-          red = 201;
-          green = 201;
-          blue = 201;
-          alpha = 255;
+          red = 201; green = 201; blue = 201; alpha = 255;
         } else if (value >= 50) {
-          red = 36;
-          green = 22;
-          blue = 48;
-          alpha = 255;
+          red = 36; green = 22; blue = 48; alpha = 255;
         } else {
-          red = 255;
-          green = 255;
-          blue = 255;
-          alpha = 255;
+          red = 255; green = 255; blue = 255; alpha = 255;
         }
       } else if (value > 0) {
         const normalized = Math.min(Math.max(value / 100, 0), 1);
@@ -992,22 +975,43 @@ function buildOccupancyTexture(
       rgba[targetIndex + 3] = alpha;
     }
   }
+}
 
-  context.putImageData(imageData, 0, 0);
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.needsUpdate = true;
+// Allocates a new DataTexture for an occupancy grid.
+function buildOccupancyTexture(
+  grid: OccupancyGridMessage,
+  palette: "map" | "global_costmap" | "local_costmap",
+): THREE.DataTexture {
+  const { width, height } = grid.info;
+  const rgba = new Uint8Array(width * height * 4);
+  fillOccupancyPixels(rgba, grid, palette);
+  const texture = new THREE.DataTexture(rgba, width, height, THREE.RGBAFormat);
   texture.magFilter = THREE.NearestFilter;
   texture.minFilter = THREE.NearestFilter;
   texture.generateMipmaps = false;
-  texture.flipY = true;
+  // DataTexture default flipY=false; row-0 is already at bottom (see fillOccupancyPixels)
+  texture.flipY = false;
   texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
   return texture;
+}
+
+// Refreshes an existing DataTexture in-place (no GPU object re-allocation).
+// Only valid when grid dimensions match the texture's current size.
+function refreshOccupancyTexture(
+  texture: THREE.DataTexture,
+  grid: OccupancyGridMessage,
+  palette: "map" | "global_costmap" | "local_costmap",
+) {
+  fillOccupancyPixels(texture.image.data as Uint8Array, grid, palette);
+  texture.needsUpdate = true;
 }
 
 function buildOccupancyMesh(
   grid: OccupancyGridMessage,
   palette: "map" | "global_costmap" | "local_costmap",
   yOffset: number,
+  texture: THREE.DataTexture,
 ) {
   const widthMeters = grid.info.width * grid.info.resolution;
   const heightMeters = grid.info.height * grid.info.resolution;
@@ -1019,7 +1023,7 @@ function buildOccupancyMesh(
   const mesh = new THREE.Mesh(
     new THREE.PlaneGeometry(widthMeters, heightMeters),
     new THREE.MeshBasicMaterial({
-      map: buildOccupancyTexture(grid, palette),
+      map: texture,
       transparent: palette !== "map",
       depthWrite: palette === "map",
       side: THREE.DoubleSide,
@@ -1151,12 +1155,29 @@ function resolveRobotScenePose(
   return createPoseFromResolvedFrame(resolvedBase);
 }
 
+// Shared scan sprite texture – created once, reused across all scan updates.
+let _scanSpriteTexture: THREE.Texture | null = null;
+function getOrCreateScanSpriteTexture() {
+  if (!_scanSpriteTexture) {
+    _scanSpriteTexture = createScanSpriteTexture();
+  }
+  return _scanSpriteTexture;
+}
+
+// Max scan points we pre-allocate.  Covers 360° @ 0.25° (1440) plus margin.
+const SCAN_BUFFER_CAPACITY = 2048;
+
+// Builds (or updates in-place) the scan point cloud.
+// `existing` – if provided and the new point count fits, the buffer is updated
+// in-place without reallocating the GPU geometry.  Returns the (possibly same)
+// THREE.Points object, or null when there are no valid points.
 function buildScanPoints(
   scan: LaserScanMessage | undefined,
   tf: TfMessage | undefined,
   tfStatic: TfMessage | undefined,
   robotPose: Pose | undefined,
-) {
+  existing?: THREE.Points | null,
+): THREE.Points | null {
   if (!scan) {
     return null;
   }
@@ -1164,19 +1185,15 @@ function buildScanPoints(
   const lookup = buildFrameLookup(tf, tfStatic);
   const scanFrame = resolveFrame(scan.header.frame_id, lookup, robotPose);
   const fallbackPose = robotPose
-    ? {
-      x: robotPose.position.x,
-      y: robotPose.position.y,
-      z: robotPose.position.z,
-      yaw: robotPose.orientation.yaw,
-    }
+    ? { x: robotPose.position.x, y: robotPose.position.y, z: robotPose.position.z, yaw: robotPose.orientation.yaw }
     : { x: 0, y: 0, z: 0, yaw: 0 };
   const pose = scanFrame ?? fallbackPose;
-  const points: number[] = [];
 
+  // Compute points into a temporary flat array first
+  const tmp: number[] = [];
   if (scan.points && scan.points.length > 0) {
     for (const point of scan.points) {
-      points.push(point.x, 0.08 + (point.z ?? 0), -point.y);
+      tmp.push(point.x, 0.08 + (point.z ?? 0), -point.y);
     }
   } else {
     for (let index = 0; index < scan.ranges.length; index += 1) {
@@ -1184,24 +1201,53 @@ function buildScanPoints(
       if (!Number.isFinite(range) || range < scan.range_min || range > scan.range_max) {
         continue;
       }
-
       const angle = scan.angle_min + (index * scan.angle_increment);
       const localX = Math.cos(angle) * range;
       const localY = Math.sin(angle) * range;
       const rotated = rotate2d(localX, localY, pose.yaw);
-      points.push(pose.x + rotated.x, 0.08, -(pose.y + rotated.y));
+      tmp.push(pose.x + rotated.x, 0.08, -(pose.y + rotated.y));
     }
   }
 
-  if (points.length === 0) {
+  const pointCount = tmp.length / 3;
+  if (pointCount === 0) {
     return null;
   }
 
+  // ── Try in-place update ───────────────────────────────────────────
+  if (existing) {
+    const geom = existing.geometry as THREE.BufferGeometry;
+    const attr = geom.attributes["position"] as THREE.BufferAttribute | undefined;
+    if (attr && (attr.array as Float32Array).length >= tmp.length) {
+      (attr.array as Float32Array).set(tmp);
+      attr.needsUpdate = true;
+      geom.setDrawRange(0, pointCount);
+      return existing;
+    }
+    // Buffer too small – fall through to rebuild
+    geom.dispose();
+  }
+
+  // ── Allocate new geometry (first time or buffer grew) ────────────
+  const capacity = Math.max(pointCount, SCAN_BUFFER_CAPACITY);
+  const posArray = new Float32Array(capacity * 3);
+  posArray.set(tmp);
+  const attr = new THREE.BufferAttribute(posArray, 3);
+  attr.setUsage(THREE.DynamicDrawUsage);
+
   const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.Float32BufferAttribute(points, 3));
+  geometry.setAttribute("position", attr);
+  geometry.setDrawRange(0, pointCount);
+
+  if (existing) {
+    // Reuse the Points object (avoids removing/re-adding from scene)
+    existing.geometry = geometry;
+    return existing;
+  }
+
   const material = new THREE.PointsMaterial({
     color: "#25d038",
-    map: createScanSpriteTexture(),
+    map: getOrCreateScanSpriteTexture(),
     transparent: true,
     opacity: 0.98,
     alphaTest: 0.15,
@@ -1539,6 +1585,11 @@ export function SceneViewport({
   const mapOutlineRef = useRef<THREE.Line | null>(null);
   const globalCostmapOutlineRef = useRef<THREE.Line | null>(null);
   const localCostmapOutlineRef = useRef<THREE.Line | null>(null);
+  // Per-layer DataTexture refs – kept alive so we can refresh pixels in-place
+  // without reallocating GPU objects when only cell values change.
+  const mapTextureRef = useRef<THREE.DataTexture | null>(null);
+  const globalCostmapTextureRef = useRef<THREE.DataTexture | null>(null);
+  const localCostmapTextureRef = useRef<THREE.DataTexture | null>(null);
   const footprintRef = useRef<THREE.Group | null>(null);
   const blockedFootprintRef = useRef<THREE.Group | null>(null);
   const blockedLinkRef = useRef<THREE.Group | null>(null);
@@ -2140,33 +2191,49 @@ export function SceneViewport({
       previousRouteWaypointsRef.current = routeWaypoints;
     }
 
-    for (const [ref, outlineRef, grid, palette, yOffset] of [
-      [mapMeshRef, mapOutlineRef, state.map, "map", 0.005],
-      [globalCostmapMeshRef, globalCostmapOutlineRef, state.global_costmap, "global_costmap", 0.02],
-      [localCostmapMeshRef, localCostmapOutlineRef, state.local_costmap, "local_costmap", 0.03],
+    for (const [meshRef, outlineRef, texRef, grid, palette, yOffset] of [
+      [mapMeshRef, mapOutlineRef, mapTextureRef, state.map, "map", 0.005],
+      [globalCostmapMeshRef, globalCostmapOutlineRef, globalCostmapTextureRef, state.global_costmap, "global_costmap", 0.02],
+      [localCostmapMeshRef, localCostmapOutlineRef, localCostmapTextureRef, state.local_costmap, "local_costmap", 0.03],
     ] as const) {
       const previousGrid =
         palette === "map" ? previousMapInputsRef.current.map :
         palette === "global_costmap" ? previousMapInputsRef.current.globalCostmap :
         previousMapInputsRef.current.localCostmap;
+
       if (previousGrid !== grid) {
-        if (ref.current) {
-          scene.remove(ref.current);
-          disposeObject(ref.current);
-          ref.current = null;
-        }
-        if (outlineRef.current) {
-          scene.remove(outlineRef.current);
-          disposeObject(outlineRef.current);
-          outlineRef.current = null;
-        }
-        if (grid) {
-          ref.current = buildOccupancyMesh(grid, palette, yOffset);
-          scene.add(ref.current);
+        if (grid && texRef.current
+          && texRef.current.image.width === grid.info.width
+          && texRef.current.image.height === grid.info.height) {
+          // Same dimensions → refresh pixels in-place, no GPU object re-allocation
+          refreshOccupancyTexture(texRef.current, grid, palette);
+        } else {
+          // Dimensions changed or first load → rebuild mesh + texture
+          if (meshRef.current) {
+            scene.remove(meshRef.current);
+            disposeObject(meshRef.current);
+            meshRef.current = null;
+          }
+          if (outlineRef.current) {
+            scene.remove(outlineRef.current);
+            disposeObject(outlineRef.current);
+            outlineRef.current = null;
+          }
+          if (texRef.current) {
+            texRef.current.dispose();
+            texRef.current = null;
+          }
+          if (grid) {
+            const tex = buildOccupancyTexture(grid, palette);
+            texRef.current = tex;
+            meshRef.current = buildOccupancyMesh(grid, palette, yOffset, tex);
+            scene.add(meshRef.current);
+          }
         }
       }
-      if (ref.current) {
-        ref.current.visible =
+
+      if (meshRef.current) {
+        meshRef.current.visible =
           palette === "map" ? layerVisibility.map :
           palette === "global_costmap" ? layerVisibility.globalCostmap :
           layerVisibility.localCostmap;
