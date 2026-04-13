@@ -1390,6 +1390,11 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
   }, [connectionLabel, robotId]);
 
   useEffect(() => {
+    // When both axes are zero there is nothing to integrate – skip the loop entirely.
+    if (Math.abs(teleopLinearX) < 0.0001 && Math.abs(teleopAngularZ) < 0.0001) {
+      return;
+    }
+
     let previousTime = performance.now();
     let animationFrame = 0;
 

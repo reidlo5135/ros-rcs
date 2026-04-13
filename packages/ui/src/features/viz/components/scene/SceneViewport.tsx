@@ -1598,6 +1598,13 @@ export function SceneViewport({
   const scanRef = useRef<THREE.Points | null>(null);
   const tfGroupRef = useRef<THREE.Group | null>(null);
   const goalMarkerRef = useRef<THREE.Group | null>(null);
+  // Cache buildFrameLookup result by (tf, tfStatic, robotDescription) identity
+  const frameLookupCacheRef = useRef<{
+    tf: TfMessage | undefined;
+    tfStatic: TfMessage | undefined;
+    robotDescription: string | undefined;
+    lookup: Map<string, FrameEdge>;
+  } | null>(null);
   const routeMarkersGroupRef = useRef<THREE.Group | null>(null);
   const previewMarkerRef = useRef<THREE.Group | null>(null);
   const lastCenteredMapSignatureRef = useRef("");
@@ -2061,6 +2068,23 @@ export function SceneViewport({
       return;
     }
 
+    // ── Frame-lookup cache (avoid rebuilding when tf/tfStatic unchanged) ──
+    const rdataKey = state.robot_description?.data;
+    const cached = frameLookupCacheRef.current;
+    if (
+      !cached
+      || cached.tf !== state.tf
+      || cached.tfStatic !== state.tf_static
+      || cached.robotDescription !== rdataKey
+    ) {
+      frameLookupCacheRef.current = {
+        tf: state.tf,
+        tfStatic: state.tf_static,
+        robotDescription: rdataKey,
+        lookup: buildFrameLookup(state.tf, state.tf_static, rdataKey),
+      };
+    }
+
     const robotPose = resolveRobotScenePose(
       state.tf,
       state.tf_static,
@@ -2322,15 +2346,24 @@ export function SceneViewport({
       || previousScanInputsRef.current.tfStatic !== state.tf_static
       || previousScanInputsRef.current.robotPose !== robotPose;
     if (shouldRebuildScan) {
-      if (scanRef.current) {
-        scene.remove(scanRef.current);
-        disposeObject(scanRef.current);
-        scanRef.current = null;
+      const next = buildScanPoints(state.scan, state.tf, state.tf_static, robotPose, scanRef.current);
+      if (!next) {
+        // No points at all – remove from scene and dispose
+        if (scanRef.current) {
+          scene.remove(scanRef.current);
+          disposeObject(scanRef.current);
+          scanRef.current = null;
+        }
+      } else if (next !== scanRef.current) {
+        // New THREE.Points object (first time or buffer grew) – swap into scene
+        if (scanRef.current) {
+          scene.remove(scanRef.current);
+          disposeObject(scanRef.current);
+        }
+        scene.add(next);
+        scanRef.current = next;
       }
-      scanRef.current = buildScanPoints(state.scan, state.tf, state.tf_static, robotPose);
-      if (scanRef.current) {
-        scene.add(scanRef.current);
-      }
+      // else: in-place update – Points object unchanged, already in scene
       previousScanInputsRef.current = {
         scan: state.scan,
         tf: state.tf,
