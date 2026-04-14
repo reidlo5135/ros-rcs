@@ -455,7 +455,7 @@ function buildArrowPoseMarker(
 ) {
   const group = new THREE.Group();
   group.position.set(goalMarker.x, 0, -goalMarker.y);
-  group.rotation.y = -goalMarker.yaw;
+  group.rotation.y = goalMarker.yaw;
 
   // Arrow shaft – wider cylinder for bold visibility
   const tail = new THREE.Mesh(
@@ -555,7 +555,7 @@ function buildRobotPoseMarker(robotPose: Pose | undefined) {
 
   const marker = new THREE.Group();
   marker.position.set(robotPose.position.x, 0, -robotPose.position.y);
-  marker.rotation.y = -robotPose.orientation.yaw;
+  marker.rotation.y = robotPose.orientation.yaw;
 
   // Outer ring – gives the robot a distinct "target" look
   const bodyRing = new THREE.Mesh(
@@ -674,19 +674,30 @@ function resolveScanWorldPoints(
 
   // Use static-only lookup so the chain stops at base_link/base_footprint → robotPose.
   // Dynamic TF (odom → base_footprint) would pull the frame to the odom origin instead of the robot.
-  const staticLookup = buildFrameLookup(undefined, tfStatic);
-  const scanFrame = resolveFrame(scan.header.frame_id ?? "", staticLookup, robotPose);
-  const basePose = scanFrame ?? (robotPose
+  const frameId = scan.header.frame_id ?? "";
+  const fallbackPose = robotPose
     ? {
       x: robotPose.position.x,
       y: robotPose.position.y,
       z: robotPose.position.z,
       yaw: robotPose.orientation.yaw,
     }
-    : { x: 0, y: 0, z: 0, yaw: 0 });
+    : { x: 0, y: 0, z: 0, yaw: 0 };
+  const fullLookup = buildFrameLookup(tf, tfStatic);
+  const staticLookup = buildFrameLookup(undefined, tfStatic);
+  const basePose =
+    resolveFrame(frameId, fullLookup, robotPose)
+    ?? resolveFrame(frameId, staticLookup, robotPose)
+    ?? fallbackPose;
 
   if (scan.points?.length) {
-    return scan.points.map((point) => ({ x: point.x, y: point.y }));
+    return scan.points.map((point) => {
+      const rotated = rotate2d(point.x, point.y, basePose.yaw);
+      return {
+        x: basePose.x + rotated.x,
+        y: basePose.y + rotated.y,
+      };
+    });
   }
 
   const points: Array<{ x: number; y: number }> = [];
@@ -853,7 +864,7 @@ function buildFootprintOverlay(
 
   const group = new THREE.Group();
   group.position.set(robotPose.position.x, 0, -robotPose.position.y);
-  group.rotation.y = -robotPose.orientation.yaw;
+  group.rotation.y = robotPose.orientation.yaw;
   group.add(fill, outline);
   return group;
 }
@@ -1146,6 +1157,13 @@ function resolveRobotScenePose(
   robotPose: Pose | undefined,
   robotDescription?: string,
 ) {
+  // mqtt_server publishes viz/robot_pose directly in the fixed frame.
+  // Prefer that pose whenever available; using the TF chain here can make the
+  // scene heading lag or flip if map→odom / odom→base_* differs from robot_pose.
+  if (robotPose) {
+    return robotPose;
+  }
+
   const lookup = buildFrameLookup(tf, tfStatic, robotDescription);
   const cache = new Map<string, ResolvedFrame | null>();
   const resolvedBase =
@@ -1153,7 +1171,7 @@ function resolveRobotScenePose(
     ?? resolveFrame("base_link", lookup, robotPose, cache);
 
   if (!resolvedBase) {
-    return robotPose;
+    return null;
   }
 
   return createPoseFromResolvedFrame(resolvedBase);
@@ -1170,6 +1188,18 @@ function getOrCreateScanSpriteTexture() {
 
 // Max scan points we pre-allocate.  Covers 360° @ 0.25° (1440) plus margin.
 const SCAN_BUFFER_CAPACITY = 2048;
+
+function projectScanLocalPoint(
+  point: { x: number; y: number; z?: number },
+  pose: { x: number; y: number; z: number; yaw: number },
+) {
+  const rotated = rotate2d(point.x, point.y, pose.yaw);
+  return {
+    x: pose.x + rotated.x,
+    y: pose.y + rotated.y,
+    z: pose.z + (point.z ?? 0),
+  };
+}
 
 // Builds (or updates in-place) the scan point cloud.
 // `existing` – if provided and the new point count fits, the buffer is updated
@@ -1188,18 +1218,23 @@ function buildScanPoints(
 
   // Use static-only lookup: base_scan → base_link offset from tf_static only.
   // Dynamic TF (odom → base_footprint) would pull the origin to odom instead of robotPose.
-  const staticLookup = buildFrameLookup(undefined, tfStatic);
-  const scanFrame = resolveFrame(scan.header.frame_id ?? "", staticLookup, robotPose);
+  const frameId = scan.header.frame_id ?? "";
   const fallbackPose = robotPose
     ? { x: robotPose.position.x, y: robotPose.position.y, z: robotPose.position.z, yaw: robotPose.orientation.yaw }
     : { x: 0, y: 0, z: 0, yaw: 0 };
-  const pose = scanFrame ?? fallbackPose;
+  const fullLookup = buildFrameLookup(tf, tfStatic);
+  const staticLookup = buildFrameLookup(undefined, tfStatic);
+  const pose =
+    resolveFrame(frameId, fullLookup, robotPose)
+    ?? resolveFrame(frameId, staticLookup, robotPose)
+    ?? fallbackPose;
 
   // Compute points into a temporary flat array first
   const tmp: number[] = [];
   if (scan.points && scan.points.length > 0) {
     for (const point of scan.points) {
-      tmp.push(point.x, 0.08 + (point.z ?? 0), -point.y);
+      const projected = projectScanLocalPoint(point, pose);
+      tmp.push(projected.x, 0.08 + projected.z, -projected.y);
     }
   } else {
     for (let index = 0; index < scan.ranges.length; index += 1) {
@@ -1531,7 +1566,7 @@ function buildRobotModelGroup(
     group.add(fallback);
     if (robotPose) {
       group.position.set(robotPose.position.x, 0, -robotPose.position.y);
-      group.rotation.y = -robotPose.orientation.yaw;
+      group.rotation.y = robotPose.orientation.yaw;
     }
     return group;
   }
@@ -1553,9 +1588,9 @@ function buildRobotModelGroup(
       -(frame.y + rotatedOrigin.y),
     );
     if (descriptor.includes("wheel")) {
-      mesh.rotation.set(visual.rpy.x, -(frame.yaw + visual.rpy.z), visual.rpy.y, "XYZ");
+      mesh.rotation.set(visual.rpy.x, frame.yaw + visual.rpy.z, visual.rpy.y, "XYZ");
     } else {
-      mesh.rotation.set(frame.roll + visual.rpy.x, -(frame.yaw + visual.rpy.z), frame.pitch + visual.rpy.y, "XYZ");
+      mesh.rotation.set(frame.roll + visual.rpy.x, frame.yaw + visual.rpy.z, frame.pitch + visual.rpy.y, "XYZ");
     }
     group.add(mesh);
   }
@@ -2126,7 +2161,7 @@ export function SceneViewport({
       };
     }
     robot.position.set(robotPose?.position.x ?? 0, 0, -(robotPose?.position.y ?? 0));
-    robot.rotation.set(0, -(robotPose?.orientation.yaw ?? 0), 0);
+    robot.rotation.set(0, robotPose?.orientation.yaw ?? 0, 0);
 
     if (robotMarkerRef.current) {
       scene.remove(robotMarkerRef.current);

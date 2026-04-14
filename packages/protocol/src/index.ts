@@ -3,22 +3,21 @@ export type TargetKind = "robot" | "sim" | "replay";
 export const TOPIC_ROBOT_ID_TOKEN = "{robot_id}";
 
 // ---------------------------------------------------------------------------
-// Telemetry topics  (robot → client, high-volume data streams)
-// Legacy name "vizTopicDefinitions" kept for backward compatibility.
+// Visualization topics  (robot → client, JSON data streams for ros-rcs)
 // ---------------------------------------------------------------------------
 export const vizTopicDefinitions = [
-  { key: "map",               label: "Map",              defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/map` },
-  { key: "globalCostmap",     label: "Global Costmap",   defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/global_costmap` },
-  { key: "localCostmap",      label: "Local Costmap",    defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/local_costmap` },
-  { key: "robotPose",         label: "Robot Pose",       defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/robot_pose` },
-  { key: "globalPath",        label: "Global Plan",      defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/global_path` },
-  { key: "localPath",         label: "Local Plan",       defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/local_path` },
-  { key: "motionStatus",      label: "Motion Status",    defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/motion_status` },
-  { key: "scan",              label: "LaserScan",        defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/scan` },
-  { key: "batteryState",      label: "Battery State",    defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/battery_state` },
-  { key: "tf",                label: "TF",               defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/tf` },
-  { key: "tfStatic",          label: "TF Static",        defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/tf_static` },
-  { key: "robotDescription",  label: "Robot Description", defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/robot_description` },
+  { key: "map",               label: "Map",               defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/viz/map` },
+  { key: "globalCostmap",     label: "Global Costmap",    defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/viz/global_costmap` },
+  { key: "localCostmap",      label: "Local Costmap",     defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/viz/local_costmap` },
+  { key: "robotPose",         label: "Robot Pose",        defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/viz/robot_pose` },
+  { key: "globalPath",        label: "Global Plan",       defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/viz/global_path` },
+  { key: "localPath",         label: "Local Plan",        defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/viz/local_path` },
+  { key: "motionStatus",      label: "Motion Status",     defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/viz/motion_status` },
+  { key: "scan",              label: "LaserScan",         defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/viz/scan` },
+  { key: "batteryState",      label: "Battery State",     defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/viz/battery_state` },
+  { key: "tf",                label: "TF",                defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/viz/tf` },
+  { key: "tfStatic",          label: "TF Static",         defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/viz/tf_static` },
+  { key: "robotDescription",  label: "Robot Description", defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/viz/robot_description` },
 ] as const;
 
 // ---------------------------------------------------------------------------

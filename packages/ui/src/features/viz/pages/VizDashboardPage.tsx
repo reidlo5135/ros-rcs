@@ -284,6 +284,18 @@ function resolveConfiguredTopic(topic: string, robotId: string) {
   return normalizeTopic(resolveTopicTemplate(topic, robotId.trim() || "robot1"));
 }
 
+function migrateStoredVizTopics(nextValues: Record<string, string>) {
+  const migrated: Record<string, string> = { ...nextValues };
+  for (const key of Object.keys(migrated)) {
+    const value = migrated[key];
+    if (typeof value !== "string") {
+      continue;
+    }
+    migrated[key] = value.replace("/telemetry/", "/viz/");
+  }
+  return migrated;
+}
+
 function readStoredTopicRecord<Key extends string>(storageKey: string, defaults: TopicRecord<Key>) {
   if (typeof window === "undefined") {
     return defaults;
@@ -296,7 +308,10 @@ function readStoredTopicRecord<Key extends string>(storageKey: string, defaults:
     }
 
     const parsedValue = JSON.parse(storedValue) as Record<string, string>;
-    return sanitizeTopicRecord(defaults, parsedValue);
+    const migratedValue = storageKey === "rcs.topicSettings.viz"
+      ? migrateStoredVizTopics(parsedValue)
+      : parsedValue;
+    return sanitizeTopicRecord(defaults, migratedValue);
   } catch {
     return defaults;
   }
@@ -374,6 +389,8 @@ function parseHeader(payload: unknown) {
   return {
     frame_id: typeof record?.frame_id === "string"
       ? record.frame_id
+      : typeof record?.frame === "string"
+        ? record.frame
       : typeof record?.frameId === "string"
         ? record.frameId
         : "map",
@@ -395,8 +412,8 @@ function parsePose(payload: unknown): Pose | null {
   if (record.pose) {
     const nestedPose = parsePose(record.pose);
     if (nestedPose) {
-      if (record.header && !nestedPose.header) {
-        nestedPose.header = parseHeader(record.header);
+      if (!nestedPose.header || !nestedPose.header.frame_id) {
+        nestedPose.header = parseHeader(record.header ?? record);
       }
       return nestedPose;
     }
@@ -405,14 +422,16 @@ function parsePose(payload: unknown): Pose | null {
   const positionRecord = extractRecord(record.position);
   if (positionRecord) {
     const orientationRecord = extractRecord(record.orientation);
-    const yaw = orientationRecord ? quaternionToYaw(orientationRecord) : 0;
+    const yaw = orientationRecord
+      ? coerceNumber(orientationRecord.yaw) ?? quaternionToYaw(orientationRecord)
+      : 0;
     const pose = createScenePose(
       coerceNumber(positionRecord.x) ?? 0,
       coerceNumber(positionRecord.y) ?? 0,
       yaw,
     );
     pose.position.z = coerceNumber(positionRecord.z) ?? 0;
-    pose.header = parseHeader(record.header);
+    pose.header = parseHeader(record.header ?? record);
     if (orientationRecord) {
       pose.orientation = {
         x: coerceNumber(orientationRecord.x) ?? 0,
@@ -431,7 +450,7 @@ function parsePose(payload: unknown): Pose | null {
   if (x != null && y != null) {
     const pose = createScenePose(x, y, yaw ?? 0);
     pose.position.z = coerceNumber(record.z) ?? 0;
-    pose.header = parseHeader(record.header);
+    pose.header = parseHeader(record.header ?? record);
     return pose;
   }
 
@@ -452,7 +471,7 @@ function parseOccupancyGrid(payload: unknown): OccupancyGridMessage | null {
   }
 
   return {
-    header: parseHeader(record?.header),
+    header: parseHeader(record?.header ?? record),
     info: {
       width,
       height,
@@ -475,7 +494,7 @@ function parsePathMessage(payload: unknown): PathMessage | null {
     .filter((pose): pose is Pose => pose != null);
 
   return {
-    header: parseHeader(record?.header),
+    header: parseHeader(record?.header ?? record),
     poses: parsedPoses,
   };
 }
@@ -501,7 +520,7 @@ function parseLaserScan(payload: unknown): LaserScanMessage | null {
   }
 
   return {
-    header: parseHeader(record?.header),
+    header: parseHeader(record?.header ?? record),
     angle_min: angleMin ?? 0,
     angle_increment: angleIncrement ?? 0,
     range_min: coerceNumber(record?.range_min) ?? 0,
@@ -549,7 +568,7 @@ function parseTfMessage(payload: unknown): TfMessage | null {
               y: coerceNumber(rotation.y) ?? 0,
               z: coerceNumber(rotation.z) ?? 0,
               w: coerceNumber(rotation.w) ?? 1,
-              yaw: quaternionToYaw(rotation),
+              yaw: coerceNumber(rotation.yaw) ?? quaternionToYaw(rotation),
             },
           },
         };
