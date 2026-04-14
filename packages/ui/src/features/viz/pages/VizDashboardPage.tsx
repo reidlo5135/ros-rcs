@@ -1216,9 +1216,11 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
               goal_state: label,
             },
           });
-          // Auto-clear waypoints on terminal states (Canceled or Aborted)
-          if ((code === 5 || code === 6) && routeActiveRef.current) {
+          // Auto-clear paths and waypoints on any terminal state
+          if ((code === 4 || code === 5 || code === 6) && routeActiveRef.current) {
             routeActiveRef.current = false;
+            // Clear global/local plan from scene immediately
+            scheduleBridgePatch({ global_path: undefined, local_path: undefined });
             if (autoClearTimerRef.current != null) clearTimeout(autoClearTimerRef.current);
             autoClearTimerRef.current = setTimeout(() => {
               autoClearTimerRef.current = null;
@@ -1237,7 +1239,8 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
         if (rec) {
           const res = rec as NavigateToPosesResponseMessage;
           if (res.completed && routeActiveRef.current) {
-            // Final route result – mark all waypoints done; useEffect auto-clears
+            // Final route result – clear paths and mark waypoints done
+            scheduleBridgePatch({ global_path: undefined, local_path: undefined });
             setActiveGoalIndex(res.completed_goals ?? Number.MAX_SAFE_INTEGER);
           }
           if (res.accepted === false && typeof res.message === "string") {
