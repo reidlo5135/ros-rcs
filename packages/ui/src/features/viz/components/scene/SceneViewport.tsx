@@ -672,8 +672,10 @@ function resolveScanWorldPoints(
     return [] as Array<{ x: number; y: number }>;
   }
 
-  const lookup = buildFrameLookup(tf, tfStatic);
-  const scanFrame = resolveFrame(scan.header.frame_id ?? "", lookup, robotPose);
+  // Use static-only lookup so the chain stops at base_link/base_footprint → robotPose.
+  // Dynamic TF (odom → base_footprint) would pull the frame to the odom origin instead of the robot.
+  const staticLookup = buildFrameLookup(undefined, tfStatic);
+  const scanFrame = resolveFrame(scan.header.frame_id ?? "", staticLookup, robotPose);
   const basePose = scanFrame ?? (robotPose
     ? {
       x: robotPose.position.x,
@@ -1184,8 +1186,10 @@ function buildScanPoints(
     return null;
   }
 
-  const lookup = buildFrameLookup(tf, tfStatic);
-  const scanFrame = resolveFrame(scan.header.frame_id ?? "", lookup, robotPose);
+  // Use static-only lookup: base_scan → base_link offset from tf_static only.
+  // Dynamic TF (odom → base_footprint) would pull the origin to odom instead of robotPose.
+  const staticLookup = buildFrameLookup(undefined, tfStatic);
+  const scanFrame = resolveFrame(scan.header.frame_id ?? "", staticLookup, robotPose);
   const fallbackPose = robotPose
     ? { x: robotPose.position.x, y: robotPose.position.y, z: robotPose.position.z, yaw: robotPose.orientation.yaw }
     : { x: 0, y: 0, z: 0, yaw: 0 };
