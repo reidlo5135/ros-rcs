@@ -1,6 +1,7 @@
 # RCS
 
-![alt text](image.png)
+![alt text](docs/screenshot.png)
+![alt text](docs/screenshot2.png)
 Robot Control System for AMR operations, visualization, and simulation.
 
 이 프로젝트는 `amr_viz`의 강점을 계승하되, 단순 시각화 클라이언트가 아니라 다음을 포함하는 운영 시스템을 목표로 한다.
