@@ -3,7 +3,7 @@ export type Header = {
     sec?: number;
     nanosec?: number;
   };
-  frame_id: string;
+  frame_id?: string;
 };
 
 export type Vector3 = {

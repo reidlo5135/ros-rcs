@@ -554,7 +554,7 @@ function parseTfMessage(payload: unknown): TfMessage | null {
           },
         };
       })
-      .filter((transform): transform is TfMessage["transforms"][number] => transform != null),
+      .filter((transform): transform is NonNullable<typeof transform> => transform != null),
   };
 }
 
@@ -1258,6 +1258,36 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
         return;
       }
 
+      // ── map/result ───────────────────────────────────────────────────────
+      if (buildTopicVariants(`/amr/${rid}/map/result`).includes(topic)) {
+        const rec = extractRecord(safeParseJsonPayload(text));
+        if (rec) {
+          const ok = rec.success !== false;
+          pushEvent(`Map save ${ok ? "succeeded" : `failed: ${rec.message ?? "unknown"}`}`);
+        }
+        return;
+      }
+
+      // ── segment/response ─────────────────────────────────────────────────
+      if (buildTopicVariants(`/amr/${rid}/segment/response`).includes(topic)) {
+        const rec = extractRecord(safeParseJsonPayload(text));
+        if (rec) {
+          const ok = rec.success !== false;
+          pushEvent(`Segment plan ${ok ? "succeeded" : `failed: ${rec.message ?? "unknown"}`}`);
+        }
+        return;
+      }
+
+      // ── route/response ───────────────────────────────────────────────────
+      if (buildTopicVariants(`/amr/${rid}/route/response`).includes(topic)) {
+        const rec = extractRecord(safeParseJsonPayload(text));
+        if (rec) {
+          const ok = rec.success !== false;
+          pushEvent(`Route plan ${ok ? "succeeded" : `failed: ${rec.message ?? "unknown"}`}`);
+        }
+        return;
+      }
+
       const matchingKey = findMatchingVizKey(topic, vizTopicsRef.current);
       if (!matchingKey) {
         return;
@@ -1422,6 +1452,12 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
       const deltaSeconds = Math.min((now - previousTime) / 1000, 0.05);
       previousTime = now;
 
+      // Publish velocity to robot at rAF rate
+      publishCommand(commandTopics.motionCommand, {
+        linear_x: teleopLinearX,
+        angular_z: teleopAngularZ,
+      }, "Motion Command");
+
       if (!livePoseActiveRef.current) {
         setBridgeState((current: BridgeState) => {
           const currentPose = current.robot_pose ?? DEFAULT_ROBOT_POSE;
@@ -1448,7 +1484,11 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
     };
 
     animationFrame = window.requestAnimationFrame(tick);
-    return () => window.cancelAnimationFrame(animationFrame);
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      // Publish zero-velocity stop when joystick is released
+      publishCommand(commandTopics.motionCommand, { linear_x: 0, angular_z: 0 }, "Motion Stop");
+    };
   }, [teleopAngularZ, teleopLinearX]);
 
   return (

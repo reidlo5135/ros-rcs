@@ -29,7 +29,12 @@ export const commandTopicDefinitions = [
   { key: "navigationCommand", label: "Navigation Command", defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/navigation/command` },
   { key: "navigationCancel",  label: "Navigation Cancel",  defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/navigation/cancel` },
   { key: "poseSet",           label: "Set Initial Pose",   defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/pose/set` },
+  { key: "mapSave",           label: "Map Save",           defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/map/save` },
+  { key: "motionCommand",     label: "Motion Command",     defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/motion/command` },
+  { key: "segmentRequest",    label: "Segment Request",    defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/segment/request` },
+  { key: "routeRequest",      label: "Route Request",      defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/route/request` },
   { key: "systemPing",        label: "System Ping",        defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/system/ping` },
+  { key: "systemRobot",       label: "System Robot",       defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/system/robot` },
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -41,6 +46,9 @@ export const resultTopicDefinitions = [
   { key: "navigationStatus",   label: "Navigation Status",   defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/navigation/status` },
   { key: "navigationResult",   label: "Navigation Result",   defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/navigation/result` },
   { key: "poseResult",         label: "Pose Result",         defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/pose/result` },
+  { key: "mapResult",          label: "Map Result",          defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/map/result` },
+  { key: "segmentResponse",    label: "Segment Response",    defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/segment/response` },
+  { key: "routeResponse",      label: "Route Response",      defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/route/response` },
   { key: "systemResult",       label: "System Result",       defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/system/result` },
 ] as const;
 

@@ -673,7 +673,7 @@ function resolveScanWorldPoints(
   }
 
   const lookup = buildFrameLookup(tf, tfStatic);
-  const scanFrame = resolveFrame(scan.header.frame_id, lookup, robotPose);
+  const scanFrame = resolveFrame(scan.header.frame_id ?? "", lookup, robotPose);
   const basePose = scanFrame ?? (robotPose
     ? {
       x: robotPose.position.x,
@@ -1037,8 +1037,14 @@ function buildFrameLookup(tf?: TfMessage, tfStatic?: TfMessage, robotDescription
   const lookup = parseUrdfFrameLookup(robotDescription);
   const collect = (message: TfMessage | undefined) => {
     for (const transform of message?.transforms ?? []) {
-      lookup.set(transform.child_frame_id, {
-        parent: transform.header.frame_id,
+      const childFrame = transform.child_frame_id;
+      const parentFrame = transform.header?.frame_id;
+      // Skip transforms with missing frame IDs (bridge may omit them during startup)
+      if (!childFrame || !parentFrame) {
+        continue;
+      }
+      lookup.set(childFrame, {
+        parent: parentFrame,
         translation: {
           x: transform.transform.translation.x,
           y: transform.transform.translation.y,
@@ -1179,7 +1185,7 @@ function buildScanPoints(
   }
 
   const lookup = buildFrameLookup(tf, tfStatic);
-  const scanFrame = resolveFrame(scan.header.frame_id, lookup, robotPose);
+  const scanFrame = resolveFrame(scan.header.frame_id ?? "", lookup, robotPose);
   const fallbackPose = robotPose
     ? { x: robotPose.position.x, y: robotPose.position.y, z: robotPose.position.z, yaw: robotPose.orientation.yaw }
     : { x: 0, y: 0, z: 0, yaw: 0 };
@@ -1347,7 +1353,7 @@ function buildTfGroup(
 
   for (const entry of transforms) {
     const child = resolveFrame(entry.transform.child_frame_id, lookup, robotPose, cache);
-    const parent = resolveFrame(entry.transform.header.frame_id, lookup, robotPose, cache);
+    const parent = resolveFrame(entry.transform.header?.frame_id ?? "", lookup, robotPose, cache);
     if (!child) {
       continue;
     }
