@@ -108,6 +108,7 @@ export type NavigateToPosesResponseMessage = {
   success?: boolean;
   accepted?: boolean;
   completed?: boolean;
+  status_code?: number;
   completed_goals?: number;
   message?: string;
 };

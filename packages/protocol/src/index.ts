@@ -2,71 +2,73 @@ export type TargetKind = "robot" | "sim" | "replay";
 
 export const TOPIC_ROBOT_ID_TOKEN = "{robot_id}";
 
-export const rawTelemetryTopicDefinitions = [
-  { key: "map", label: "Map", defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/map` },
-  { key: "tfStatic", label: "TF Static", defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/tf_static` },
-  { key: "robotDescription", label: "Robot Description", defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/robot_description` },
-  { key: "scan", label: "Scan", defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/scan` },
-  { key: "odom", label: "Odom", defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/odom` },
-  { key: "imu", label: "IMU", defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/imu` },
-  { key: "tf", label: "TF", defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/tf` },
-  { key: "jointStates", label: "Joint States", defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/joint_states` },
-  { key: "robotPose", label: "Robot Pose", defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/robot_pose` },
-  { key: "globalCostmap", label: "Global Costmap", defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/global_costmap` },
-  { key: "localCostmap", label: "Local Costmap", defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/local_costmap` },
-  { key: "globalPath", label: "Global Path", defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/global_path` },
-  { key: "localPath", label: "Local Path", defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/local_path` },
-  { key: "motionStatus", label: "Motion Status", defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/motion_status` },
-  { key: "batteryState", label: "Battery State", defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/battery_state` },
-] as const;
-
+// ---------------------------------------------------------------------------
+// Telemetry topics  (robot → client, high-volume data streams)
+// Legacy name "vizTopicDefinitions" kept for backward compatibility.
+// ---------------------------------------------------------------------------
 export const vizTopicDefinitions = [
-  { key: "map", label: "Map", defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/viz/map` },
-  { key: "globalCostmap", label: "Global Costmap", defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/viz/global_costmap` },
-  { key: "localCostmap", label: "Local Costmap", defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/viz/local_costmap` },
-  { key: "robotPose", label: "Robot Pose", defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/viz/robot_pose` },
-  { key: "globalPath", label: "Global Plan", defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/viz/global_path` },
-  { key: "localPath", label: "Local Plan", defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/viz/local_path` },
-  { key: "motionStatus", label: "Motion Status", defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/viz/motion_status` },
-  { key: "scan", label: "LaserScan", defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/viz/scan` },
-  { key: "batteryState", label: "Battery State", defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/viz/battery_state` },
-  { key: "tf", label: "TF", defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/viz/tf` },
-  { key: "tfStatic", label: "TF Static", defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/viz/tf_static` },
-  { key: "robotDescription", label: "Robot Description", defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/viz/robot_description` },
+  { key: "map",               label: "Map",              defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/map` },
+  { key: "globalCostmap",     label: "Global Costmap",   defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/global_costmap` },
+  { key: "localCostmap",      label: "Local Costmap",    defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/local_costmap` },
+  { key: "robotPose",         label: "Robot Pose",       defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/robot_pose` },
+  { key: "globalPath",        label: "Global Plan",      defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/global_path` },
+  { key: "localPath",         label: "Local Plan",       defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/local_path` },
+  { key: "motionStatus",      label: "Motion Status",    defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/motion_status` },
+  { key: "scan",              label: "LaserScan",        defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/scan` },
+  { key: "batteryState",      label: "Battery State",    defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/battery_state` },
+  { key: "tf",                label: "TF",               defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/tf` },
+  { key: "tfStatic",          label: "TF Static",        defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/tf_static` },
+  { key: "robotDescription",  label: "Robot Description", defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/telemetry/robot_description` },
 ] as const;
 
+// ---------------------------------------------------------------------------
+// Command topics  (client → robot, operator control plane)
+// All topics use {robot_id} token – resolve with resolveTopicTemplate().
+// ---------------------------------------------------------------------------
 export const commandTopicDefinitions = [
-  { key: "navigateToPose", label: "Navigate To Pose", defaultTopic: "/amr/command/navigate_to_pose" },
-  { key: "cancelNavigateToPose", label: "Cancel Navigate To Pose", defaultTopic: "/amr/command/cancel_navigate_to_pose" },
-  { key: "navigateToPoses", label: "Navigate To Poses", defaultTopic: "/amr/command/navigate_to_poses" },
-  { key: "cancelNavigateToPoses", label: "Cancel Navigate To Poses", defaultTopic: "/amr/command/cancel_navigate_to_poses" },
-  { key: "setInitialPose", label: "Set Initial Pose", defaultTopic: "/amr/command/set_initial_pose" },
+  { key: "navigationCommand", label: "Navigation Command", defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/navigation/command` },
+  { key: "navigationCancel",  label: "Navigation Cancel",  defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/navigation/cancel` },
+  { key: "poseSet",           label: "Set Initial Pose",   defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/pose/set` },
+  { key: "systemPing",        label: "System Ping",        defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/system/ping` },
 ] as const;
 
-export type RawTelemetryTopicKey = (typeof rawTelemetryTopicDefinitions)[number]["key"];
-export type VizTopicKey = (typeof vizTopicDefinitions)[number]["key"];
-export type CommandTopicKey = (typeof commandTopicDefinitions)[number]["key"];
+// ---------------------------------------------------------------------------
+// Result / feedback topics  (robot → client, control plane responses)
+// Fixed topics – not user-configurable, built from robot_id at connect time.
+// ---------------------------------------------------------------------------
+export const resultTopicDefinitions = [
+  { key: "navigationFeedback", label: "Navigation Feedback", defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/navigation/feedback` },
+  { key: "navigationStatus",   label: "Navigation Status",   defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/navigation/status` },
+  { key: "navigationResult",   label: "Navigation Result",   defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/navigation/result` },
+  { key: "poseResult",         label: "Pose Result",         defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/pose/result` },
+  { key: "systemResult",       label: "System Result",       defaultTopic: `/amr/${TOPIC_ROBOT_ID_TOKEN}/system/result` },
+] as const;
+
+export type VizTopicKey       = (typeof vizTopicDefinitions)[number]["key"];
+export type CommandTopicKey   = (typeof commandTopicDefinitions)[number]["key"];
+export type ResultTopicKey    = (typeof resultTopicDefinitions)[number]["key"];
 
 export type TopicRecord<Key extends string> = Record<Key, string>;
 
-export const defaultRawTelemetryTopics: TopicRecord<RawTelemetryTopicKey> = Object.fromEntries(
-  rawTelemetryTopicDefinitions.map((entry) => [entry.key, entry.defaultTopic]),
-) as TopicRecord<RawTelemetryTopicKey>;
-
 export const defaultVizTopics: TopicRecord<VizTopicKey> = Object.fromEntries(
-  vizTopicDefinitions.map((entry) => [entry.key, entry.defaultTopic]),
+  vizTopicDefinitions.map((e) => [e.key, e.defaultTopic]),
 ) as TopicRecord<VizTopicKey>;
 
 export const defaultCommandTopics: TopicRecord<CommandTopicKey> = Object.fromEntries(
-  commandTopicDefinitions.map((entry) => [entry.key, entry.defaultTopic]),
+  commandTopicDefinitions.map((e) => [e.key, e.defaultTopic]),
 ) as TopicRecord<CommandTopicKey>;
 
+export const defaultResultTopics: TopicRecord<ResultTopicKey> = Object.fromEntries(
+  resultTopicDefinitions.map((e) => [e.key, e.defaultTopic]),
+) as TopicRecord<ResultTopicKey>;
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 export type SessionTarget = {
   kind: TargetKind;
   id: string;
 };
-
-export type TopicChannel = "viz" | "command" | "response" | "feedback" | "status" | "event";
 
 export type RuntimeSnapshot = {
   connectionLabel: string;
@@ -82,20 +84,16 @@ export function resolveTopicTemplate(topic: string, robotId: string) {
   return topic.replaceAll(TOPIC_ROBOT_ID_TOKEN, robotId);
 }
 
-export function buildTopicRoot(target: SessionTarget) {
-  return `rcs/${target.kind}/${target.id}`;
-}
-
-export function buildTopic(target: SessionTarget, channel: TopicChannel, name?: string) {
-  const root = buildTopicRoot(target);
-  return name ? `${root}/${channel}/${name}` : `${root}/${channel}`;
+/** Resolves all result topic templates for a given robotId. */
+export function buildResultTopics(robotId: string): TopicRecord<ResultTopicKey> {
+  const id = robotId.trim() || "robot1";
+  return Object.fromEntries(
+    resultTopicDefinitions.map((e) => [e.key, e.defaultTopic.replaceAll(TOPIC_ROBOT_ID_TOKEN, id)]),
+  ) as TopicRecord<ResultTopicKey>;
 }
 
 export function createDemoTarget(): SessionTarget {
-  return {
-    kind: "robot",
-    id: "tb3-01",
-  };
+  return { kind: "robot", id: "tb3-01" };
 }
 
 export function createDemoSnapshot(): RuntimeSnapshot {

@@ -9,6 +9,7 @@ import {
 import mqtt, { type MqttClient } from "mqtt";
 
 import {
+  buildResultTopics,
   commandTopicDefinitions,
   createDemoTarget,
   defaultCommandTopics,
@@ -674,8 +675,8 @@ function extractTopicSuffix(topic: string) {
 function buildVizSubscriptions(topics: TopicRecord<VizTopicKey>, robotId: string) {
   const normalizedRobotId = robotId.trim() || "robot1";
   const subscriptions = new Set<string>();
-  subscriptions.add(`/amr/${normalizedRobotId}/viz/#`);
-  subscriptions.add(`/amr/${normalizedRobotId}/response/#`);
+  // Wildcard covers all telemetry/* streams from this robot
+  subscriptions.add(`/amr/${normalizedRobotId}/telemetry/#`);
 
   for (const topic of Object.values(topics)) {
     for (const variant of buildTopicVariants(resolveConfiguredTopic(topic, normalizedRobotId))) {
@@ -683,6 +684,18 @@ function buildVizSubscriptions(topics: TopicRecord<VizTopicKey>, robotId: string
     }
   }
 
+  return Array.from(subscriptions);
+}
+
+/** Returns the canonical control-plane result topics for a given robotId. */
+function buildControlSubscriptions(robotId: string) {
+  const resolved = buildResultTopics(robotId.trim() || "robot1");
+  const subscriptions = new Set<string>();
+  for (const topic of Object.values(resolved)) {
+    for (const variant of buildTopicVariants(topic)) {
+      subscriptions.add(variant);
+    }
+  }
   return Array.from(subscriptions);
 }
 
@@ -932,11 +945,17 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
       return;
     }
 
-    const previousSubscriptions = buildVizSubscriptions(vizTopicsRef.current, previousRobotId);
-    const nextSubscriptions = buildVizSubscriptions(vizTopicsRef.current, robotId);
-    if (previousSubscriptions.length > 0) {
-      client.unsubscribe(previousSubscriptions, () => {
-        client.subscribe(nextSubscriptions, (error) => {
+    const previousSubs = [
+      ...buildVizSubscriptions(vizTopicsRef.current, previousRobotId),
+      ...buildControlSubscriptions(previousRobotId),
+    ];
+    const nextSubs = Array.from(new Set([
+      ...buildVizSubscriptions(vizTopicsRef.current, robotId),
+      ...buildControlSubscriptions(robotId),
+    ]));
+    if (previousSubs.length > 0) {
+      client.unsubscribe(previousSubs, () => {
+        client.subscribe(nextSubs, (error) => {
           if (error) {
             pushEvent(`Robot topic scope update failed: ${error.message}`);
             return;
@@ -990,9 +1009,9 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
       kind: mode,
     });
 
-    publishCommand(commandTopics.setInitialPose, {
+    publishCommand(commandTopics.poseSet, {
       request_id: createCommandId(),
-      frame_id: "map",
+      frame: "map",
       pose: {
         position: { x, y, z: 0 },
         orientation: createQuaternionFromYaw(yaw),
@@ -1005,14 +1024,12 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
       return;
     }
 
-    publishCommand(commandTopics.navigateToPoses, {
+    publishCommand(commandTopics.navigationCommand, {
       request_id: createCommandId(),
       goal_poses: routeWaypoints.map(({ x, y, yaw }) => ({
-        header: { frame_id: "map" },
-        pose: {
-          position: { x, y, z: 0 },
-          orientation: createQuaternionFromYaw(yaw),
-        },
+        frame: "map",
+        position: { x, y, z: 0 },
+        orientation: createQuaternionFromYaw(yaw),
       })),
     }, "Navigate To Poses");
     setActiveGoalIndex(-1);
@@ -1118,19 +1135,16 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
       setConnectionLabel(`MQTT connected: ${mqttUrl}`);
       pushEvent(`MQTT connected: ${mqttUrl}`);
 
-      const subscriptions = buildVizSubscriptions(vizTopicsRef.current, robotId);
-      if (subscriptions.length === 0) {
-        pushEvent("No viz topics configured");
-        return;
-      }
+      const vizSubs = buildVizSubscriptions(vizTopicsRef.current, robotId);
+      const controlSubs = buildControlSubscriptions(robotId);
+      const allSubs = Array.from(new Set([...vizSubs, ...controlSubs]));
 
-      client.subscribe(subscriptions, (error) => {
+      client.subscribe(allSubs, (error) => {
         if (error) {
           pushEvent(`Subscribe failed: ${error.message}`);
           return;
         }
-
-        pushEvent(`Subscribed: ${subscriptions.length} viz topics`);
+        pushEvent(`Subscribed: ${vizSubs.length} telemetry + ${controlSubs.length} control topics`);
       });
     });
 
@@ -1158,12 +1172,14 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
     });
 
     client.on("message", (topic, payload) => {
-      if (topic === `/amr/${robotId.trim() || "robot1"}/response/ping`) {
-        const text = payload.toString("utf8").trim();
-        const parsedPayload = safeParseJsonPayload(text);
-        const record = extractRecord(parsedPayload);
-        const requestId = typeof record?.request_id === "string" ? record.request_id : "";
-        const sentAtMs = coerceNumber(record?.sent_at_ms) ?? lastPingSentAtRef.current;
+      const rid = robotId.trim() || "robot1";
+      const text = payload.toString("utf8").trim();
+
+      // ── system/result  (ping response + other system ACKs) ──────────────
+      if (buildTopicVariants(`/amr/${rid}/system/result`).includes(topic)) {
+        const rec = extractRecord(safeParseJsonPayload(text));
+        const requestId = typeof rec?.request_id === "string" ? rec.request_id : "";
+        const sentAtMs = coerceNumber(rec?.sent_at_ms) ?? lastPingSentAtRef.current;
         if (requestId && requestId === activePingRequestIdRef.current && sentAtMs != null) {
           setSignalRttMs(Math.max(0, Date.now() - sentAtMs));
           setSignalLastSeenAt(Date.now());
@@ -1172,66 +1188,74 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
         return;
       }
 
-      // navigate_to_poses sub-topics (feedback / status / response)
-      // These arrive under /amr/{id}/viz/navigate_to_poses/* via the wildcard subscription.
-      // They don't have a vizTopicDefinition entry so we handle them before findMatchingVizKey.
-      {
-        const navPrefix = `/amr/${robotId.trim() || "robot1"}/viz/navigate_to_poses`;
-        if (topic === `${navPrefix}/feedback` || topic === `${navPrefix.slice(1)}/feedback`) {
-          if (routeActiveRef.current) {
-            const text = payload.toString("utf8").trim();
-            const rec = extractRecord(safeParseJsonPayload(text));
-            if (rec && typeof rec.current_goal_index === "number") {
-              const fb = rec as NavigateToPosesFeedbackMessage;
-              setActiveGoalIndex(fb.current_goal_index);
-            }
-          }
-          return;
-        }
-        if (topic === `${navPrefix}/status` || topic === `${navPrefix.slice(1)}/status`) {
-          // ROS2 action GoalStatusArray – status codes:
-          //   2 = Executing  3 = Canceling  4 = Succeeded  5 = Canceled  6 = Aborted
-          const text = payload.toString("utf8").trim();
+      // ── navigation/feedback ─────────────────────────────────────────────
+      if (buildTopicVariants(`/amr/${rid}/navigation/feedback`).includes(topic)) {
+        if (routeActiveRef.current) {
           const rec = extractRecord(safeParseJsonPayload(text));
-          if (rec && Array.isArray(rec.status_list) && rec.status_list.length > 0) {
-            const latest = rec.status_list[rec.status_list.length - 1] as { status?: number };
-            const code = typeof latest.status === "number" ? latest.status : -1;
-            const GOAL_STATUS_LABEL: Record<number, string> = {
-              1: "Idle", 2: "Executing", 3: "Canceling", 4: "Succeeded", 5: "Canceled", 6: "Aborted",
-            };
-            const label = GOAL_STATUS_LABEL[code] ?? "Idle";
-            scheduleBridgePatch({
-              motion_status: {
-                ...(bridgeStateRef.current.motion_status ?? INITIAL_MOTION_STATUS),
-                goal_state: label,
-              },
-            });
-            // Auto-clear waypoints on terminal states (Canceled or Aborted)
-            if ((code === 5 || code === 6) && routeActiveRef.current) {
-              routeActiveRef.current = false;
-              if (autoClearTimerRef.current != null) clearTimeout(autoClearTimerRef.current);
-              autoClearTimerRef.current = setTimeout(() => {
-                autoClearTimerRef.current = null;
-                setRouteWaypoints([]);
-                setActiveGoalIndex(-1);
-                pushEvent(`Route ${label.toLowerCase()} – waypoints cleared automatically`);
-              }, 1500);
-            }
+          if (rec && typeof rec.current_goal_index === "number") {
+            const fb = rec as NavigateToPosesFeedbackMessage;
+            setActiveGoalIndex(fb.current_goal_index);
           }
-          return;
         }
-        if (topic === `${navPrefix}/response` || topic === `${navPrefix.slice(1)}/response`) {
-          const text = payload.toString("utf8").trim();
-          const rec = extractRecord(safeParseJsonPayload(text));
-          if (rec && routeActiveRef.current) {
-            const res = rec as NavigateToPosesResponseMessage;
-            if (res.completed) {
-              // Mark all waypoints as done, then auto-clear via useEffect
-              setActiveGoalIndex(res.completed_goals ?? Number.MAX_SAFE_INTEGER);
-            }
+        return;
+      }
+
+      // ── navigation/status  (GoalStatusArray) ────────────────────────────
+      if (buildTopicVariants(`/amr/${rid}/navigation/status`).includes(topic)) {
+        const rec = extractRecord(safeParseJsonPayload(text));
+        if (rec && Array.isArray(rec.status_list) && rec.status_list.length > 0) {
+          const latest = rec.status_list[rec.status_list.length - 1] as { status?: number };
+          const code = typeof latest.status === "number" ? latest.status : -1;
+          const GOAL_STATUS_LABEL: Record<number, string> = {
+            1: "Idle", 2: "Executing", 3: "Canceling", 4: "Succeeded", 5: "Canceled", 6: "Aborted",
+          };
+          const label = GOAL_STATUS_LABEL[code] ?? "Idle";
+          scheduleBridgePatch({
+            motion_status: {
+              ...(bridgeStateRef.current.motion_status ?? INITIAL_MOTION_STATUS),
+              goal_state: label,
+            },
+          });
+          // Auto-clear waypoints on terminal states (Canceled or Aborted)
+          if ((code === 5 || code === 6) && routeActiveRef.current) {
+            routeActiveRef.current = false;
+            if (autoClearTimerRef.current != null) clearTimeout(autoClearTimerRef.current);
+            autoClearTimerRef.current = setTimeout(() => {
+              autoClearTimerRef.current = null;
+              setRouteWaypoints([]);
+              setActiveGoalIndex(-1);
+              pushEvent(`Route ${label.toLowerCase()} – waypoints cleared automatically`);
+            }, 1500);
           }
-          return;
         }
+        return;
+      }
+
+      // ── navigation/result  (multiplexed: accepted / completed / cancel ack)
+      if (buildTopicVariants(`/amr/${rid}/navigation/result`).includes(topic)) {
+        const rec = extractRecord(safeParseJsonPayload(text));
+        if (rec) {
+          const res = rec as NavigateToPosesResponseMessage;
+          if (res.completed && routeActiveRef.current) {
+            // Final route result – mark all waypoints done; useEffect auto-clears
+            setActiveGoalIndex(res.completed_goals ?? Number.MAX_SAFE_INTEGER);
+          }
+          if (res.accepted === false && typeof res.message === "string") {
+            pushEvent(`Navigation rejected: ${res.message}`);
+            routeActiveRef.current = false;
+          }
+        }
+        return;
+      }
+
+      // ── pose/result ─────────────────────────────────────────────────────
+      if (buildTopicVariants(`/amr/${rid}/pose/result`).includes(topic)) {
+        const rec = extractRecord(safeParseJsonPayload(text));
+        if (rec) {
+          const ok = rec.success !== false;
+          pushEvent(`Initial pose ${ok ? "accepted" : `rejected: ${rec.message ?? "unknown"}`}`);
+        }
+        return;
       }
 
       const matchingKey = findMatchingVizKey(topic, vizTopicsRef.current);
@@ -1239,7 +1263,6 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
         return;
       }
 
-      const text = payload.toString("utf8").trim();
       const parsedPayload = safeParseJsonPayload(text);
       const effectivePayload = matchingKey === "robotDescription" && parsedPayload == null ? text : parsedPayload;
       if (effectivePayload == null) {
@@ -1375,13 +1398,10 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
       const sentAtMs = Date.now();
       activePingRequestIdRef.current = requestId;
       lastPingSentAtRef.current = sentAtMs;
-      client.publish(
-        `/amr/${robotId.trim() || "robot1"}/command/ping`,
-        JSON.stringify({
-          request_id: requestId,
-          sent_at_ms: sentAtMs,
-        }),
-      );
+      publishCommand(commandTopics.systemPing, {
+        request_id: requestId,
+        sent_at_ms: sentAtMs,
+      }, "System Ping");
     };
 
     publishPing();
@@ -1485,9 +1505,9 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
               routeActiveRef.current = false;
               setActiveGoalIndex(-1);
               setPoseInteractionMode("idle");
-              publishCommand(commandTopics.cancelNavigateToPoses, {
+              publishCommand(commandTopics.navigationCancel, {
                 request_id: createCommandId(),
-              }, "Cancel Navigate To Poses");
+              }, "Navigation Cancel");
             }}
             onSetInitialPose={() => {
               setPoseInteractionMode((current) => {
