@@ -777,7 +777,7 @@ function JoystickPad({ linearX, angularZ, onCommandChange, onCommandStop }: Joys
     const normalizedX = clamp(limitedX / (PAD_RADIUS - KNOB_RADIUS), -1, 1);
     const normalizedY = clamp(limitedY / (PAD_RADIUS - KNOB_RADIUS), -1, 1);
     const nextLinearX = -shapeNormalized(normalizedY) * MAX_LINEAR_X;
-    const nextAngularZ = shapeNormalized(normalizedX) * MAX_ANGULAR_Z;
+    const nextAngularZ = -shapeNormalized(normalizedX) * MAX_ANGULAR_Z;
 
     setDragVector({ x: limitedX, y: limitedY });
     onCommandChange(nextLinearX, nextAngularZ);
