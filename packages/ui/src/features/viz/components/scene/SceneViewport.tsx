@@ -1370,7 +1370,7 @@ function buildTfGroup(
       group.add(record.axes);
     }
     record.axes.position.set(child.x, 0.1, -child.y);
-    record.axes.rotation.set(0, -child.yaw, 0);
+    record.axes.rotation.set(0, child.yaw, 0);
 
     if (parent) {
       if (!record.line) {
