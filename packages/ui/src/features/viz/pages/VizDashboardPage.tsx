@@ -42,6 +42,7 @@ import { VisualizationPanel } from "../components/panels/VisualizationPanel";
 import { MqttPanel } from "../components/panels/MqttPanel";
 import { NavigationStatusPanel } from "../components/panels/NavigationStatusPanel";
 import { SceneViewport } from "../components/scene/SceneViewport";
+import { RobotManagerModal } from "../components/RobotManagerModal";
 
 type DashboardShellProps = {
   productName: string;
@@ -86,6 +87,32 @@ type SceneLayerVisibility = {
 
 type PoseInteractionMode = "idle" | "goal" | "initial_pose";
 
+type RobotRuntimeSummary = {
+  robotId: string;
+  markerColor: string;
+  motion: string;
+  batteryLabel: string;
+  signalLabel: string;
+};
+
+type RobotSignalState = {
+  rttMs: number | null;
+  lastSeenAt: number | null;
+};
+
+type RouteWaypoint = {
+  x: number;
+  y: number;
+  yaw: number;
+};
+
+type SceneGoalMarker = {
+  x: number;
+  y: number;
+  yaw: number;
+  kind: "goal" | "initial_pose";
+};
+
 const target = createDemoTarget();
 const PAD_RADIUS = 66;
 const KNOB_RADIUS = 17;
@@ -108,10 +135,20 @@ function createScenePose(x: number, y: number, yaw: number): Pose {
 }
 
 const DEFAULT_ROBOT_POSE = createScenePose(-0.4, -0.1, 0);
+const ROBOT_MARKER_PALETTE = [
+  "#2ec4b6",
+  "#ff9f1c",
+  "#4d96ff",
+  "#a3e635",
+  "#f472b6",
+  "#facc15",
+  "#fb7185",
+  "#38bdf8",
+];
 const INITIAL_MOTION_STATUS: MotionStatusMessage = {
   motion: "Idle",
   remaining_distance: undefined,
-  heading: null,
+  heading: undefined,
   goal_state: "Idle",
   blocked_source: "Clear",
 };
@@ -119,6 +156,9 @@ const DEFAULT_BATTERY_LABEL = "--%";
 const INITIAL_BRIDGE_STATE: BridgeState = {
   robot_pose: DEFAULT_ROBOT_POSE,
 };
+const OFFLINE_ROBOT_COLUMN_COUNT = 4;
+const OFFLINE_ROBOT_SPACING_X = 0.52;
+const OFFLINE_ROBOT_SPACING_Y = 0.44;
 
 const initialEvents: EventEntry[] = [
   { time: "--:--:--", text: "RCS MQTT client ready" },
@@ -155,6 +195,27 @@ function createEvent(text: string): EventEntry {
   return {
     time: now.toLocaleTimeString("en-GB", { hour12: false }),
     text,
+  };
+}
+
+function createOfflineRobotPose(index: number): Pose {
+  const safeIndex = Math.max(0, index);
+  const column = safeIndex % OFFLINE_ROBOT_COLUMN_COUNT;
+  const row = Math.floor(safeIndex / OFFLINE_ROBOT_COLUMN_COUNT);
+  return createScenePose(
+    DEFAULT_ROBOT_POSE.position.x + (column * OFFLINE_ROBOT_SPACING_X),
+    DEFAULT_ROBOT_POSE.position.y - (row * OFFLINE_ROBOT_SPACING_Y),
+    0,
+  );
+}
+
+function withSceneRobotPoseFallback(state: BridgeState, index: number): BridgeState {
+  if (state.robot_pose) {
+    return state;
+  }
+  return {
+    ...state,
+    robot_pose: createOfflineRobotPose(index),
   };
 }
 
@@ -284,6 +345,30 @@ function resolveConfiguredTopic(topic: string, robotId: string) {
   return normalizeTopic(resolveTopicTemplate(topic, robotId.trim() || "robot1"));
 }
 
+function parseRobotIds(value: string) {
+  const seen = new Set<string>();
+  const ids = value
+    .split(/[,\s]+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .filter((entry) => {
+      if (seen.has(entry)) {
+        return false;
+      }
+      seen.add(entry);
+      return true;
+    });
+  return ids.length > 0 ? ids : ["robot1"];
+}
+
+function buildFleetVizSubscriptions(topics: TopicRecord<VizTopicKey>, robotIds: readonly string[]) {
+  return Array.from(new Set(robotIds.flatMap((id) => buildVizSubscriptions(topics, id))));
+}
+
+function buildFleetControlSubscriptions(robotIds: readonly string[]) {
+  return Array.from(new Set(robotIds.flatMap((id) => buildControlSubscriptions(id))));
+}
+
 function migrateStoredVizTopics(nextValues: Record<string, string>) {
   const migrated: Record<string, string> = { ...nextValues };
   for (const key of Object.keys(migrated)) {
@@ -329,6 +414,83 @@ function useStoredTopicRecord<Key extends string>(storageKey: string, defaults: 
   }, [storageKey, value]);
 
   return [value, setValue] as const;
+}
+
+function readStoredText(storageKey: string, fallback: string) {
+  if (typeof window === "undefined") {
+    return fallback;
+  }
+
+  try {
+    return window.localStorage.getItem(storageKey) || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function useStoredText(storageKey: string, fallback: string) {
+  const [value, setValue] = useState(() => readStoredText(storageKey, fallback));
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    window.localStorage.setItem(storageKey, value);
+  }, [storageKey, value]);
+
+  return [value, setValue] as const;
+}
+
+function readStoredRobotColors(storageKey: string) {
+  if (typeof window === "undefined") {
+    return {};
+  }
+
+  try {
+    const value = window.localStorage.getItem(storageKey);
+    if (!value) {
+      return {};
+    }
+    const parsed = JSON.parse(value) as Record<string, string>;
+    return Object.fromEntries(
+      Object.entries(parsed).filter((entry): entry is [string, string] => (
+        typeof entry[0] === "string" &&
+        typeof entry[1] === "string" &&
+        /^#[0-9a-fA-F]{6}$/.test(entry[1])
+      )),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function hslToHex(hue: number, saturation: number, lightness: number) {
+  const normalizedSaturation = saturation / 100;
+  const normalizedLightness = lightness / 100;
+  const chroma = (1 - Math.abs((2 * normalizedLightness) - 1)) * normalizedSaturation;
+  const segment = hue / 60;
+  const x = chroma * (1 - Math.abs((segment % 2) - 1));
+  const match = normalizedLightness - (chroma / 2);
+  const [red, green, blue] =
+    segment < 1 ? [chroma, x, 0] :
+    segment < 2 ? [x, chroma, 0] :
+    segment < 3 ? [0, chroma, x] :
+    segment < 4 ? [0, x, chroma] :
+    segment < 5 ? [x, 0, chroma] :
+    [chroma, 0, x];
+  const toHex = (value: number) => Math.round((value + match) * 255).toString(16).padStart(2, "0");
+  return `#${toHex(red)}${toHex(green)}${toHex(blue)}`;
+}
+
+function createRobotMarkerColor(existingColors: Iterable<string>) {
+  const existing = new Set(Array.from(existingColors).map((color) => color.toLowerCase()));
+  const unusedPaletteColor = ROBOT_MARKER_PALETTE.find((color) => !existing.has(color.toLowerCase()));
+  if (unusedPaletteColor) {
+    return unusedPaletteColor;
+  }
+
+  return hslToHex(Math.floor(Math.random() * 360), 78, 54);
 }
 
 function createCommandId() {
@@ -649,7 +811,7 @@ function parseMotionStatus(payload: unknown) {
     active: typeof record.active === "boolean" ? record.active : undefined,
     goal_reached: typeof record.goal_reached === "boolean" ? record.goal_reached : undefined,
     remaining_distance: coerceNumber(record.remaining_distance) ?? coerceNumber(record.remaining) ?? undefined,
-    heading: coerceNumber(record.heading) ?? coerceNumber(record.heading_error),
+    heading: coerceNumber(record.heading) ?? coerceNumber(record.heading_error) ?? undefined,
     goal_state: typeof record.goal === "string"
       ? record.goal
       : typeof record.goal_state === "string"
@@ -836,7 +998,12 @@ function JoystickPad({ linearX, angularZ, onCommandChange, onCommandStop }: Joys
 export function VizDashboardPage({ productName }: DashboardShellProps) {
   const [viewMode, setViewMode] = useState<"nav" | "mapping">("nav");
   const [mqttUrl, setMqttUrl] = useState("ws://192.168.61.35:9001/mqtt");
-  const [robotId, setRobotId] = useState("burger1");
+  const [robotIdsInput, setRobotIdsInput] = useStoredText("rcs.robotIds", "burger1");
+  const robotIds = useMemo(() => parseRobotIds(robotIdsInput), [robotIdsInput]);
+  const [activeRobotId, setActiveRobotId] = useState("burger1");
+  const [robotMarkerColors, setRobotMarkerColors] = useState<Record<string, string>>(() => (
+    readStoredRobotColors("rcs.robotMarkerColors")
+  ));
   const [connectionLabel, setConnectionLabel] = useState("Disconnected");
   const [events, setEvents] = useState<EventEntry[]>(initialEvents);
   const [teleopLinearX, setTeleopLinearX] = useState(0);
@@ -844,17 +1011,13 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
   const [goalX, setGoalX] = useState("2.5");
   const [goalY, setGoalY] = useState("0.0");
   const [goalYaw, setGoalYaw] = useState("0.0");
-  const [routeWaypoints, setRouteWaypoints] = useState<ReadonlyArray<{ x: number; y: number; yaw: number }>>([]);
-  const [activeGoalIndex, setActiveGoalIndex] = useState(-1);
+  const [routeWaypointsByRobot, setRouteWaypointsByRobot] = useState<Record<string, ReadonlyArray<RouteWaypoint>>>({});
+  const [activeGoalIndexByRobot, setActiveGoalIndexByRobot] = useState<Record<string, number>>({});
   const [poseInteractionMode, setPoseInteractionMode] = useState<PoseInteractionMode>("idle");
-  const [sceneGoalMarker, setSceneGoalMarker] = useState<{
-    x: number;
-    y: number;
-    yaw: number;
-    kind: "goal" | "initial_pose";
-  } | null>(null);
+  const [sceneGoalMarkerByRobot, setSceneGoalMarkerByRobot] = useState<Record<string, SceneGoalMarker | null>>({});
   const [commandSettingsOpen, setCommandSettingsOpen] = useState(false);
   const [visualizationSettingsOpen, setVisualizationSettingsOpen] = useState(false);
+  const [robotManagerOpen, setRobotManagerOpen] = useState(false);
   const [sceneResetToken, setSceneResetToken] = useState(0);
   const [layerVisibility, setLayerVisibility] = useState<SceneLayerVisibility>({
     grid: true,
@@ -870,28 +1033,48 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
   });
   const [commandTopics, setCommandTopics] = useStoredTopicRecord("rcs.topicSettings.commands", defaultCommandTopics);
   const [vizTopics, setVizTopics] = useStoredTopicRecord("rcs.topicSettings.viz", defaultVizTopics);
-  const [bridgeState, setBridgeState] = useState<BridgeState>(INITIAL_BRIDGE_STATE);
-  const [signalRttMs, setSignalRttMs] = useState<number | null>(null);
-  const [signalLastSeenAt, setSignalLastSeenAt] = useState<number | null>(null);
+  const [fleetBridgeStates, setFleetBridgeStates] = useState<Record<string, BridgeState>>({
+    burger1: INITIAL_BRIDGE_STATE,
+  });
+  const [fleetSignals, setFleetSignals] = useState<Record<string, RobotSignalState>>({});
 
   const clientRef = useRef<MqttClient | null>(null);
-  const bridgeStateRef = useRef<BridgeState>(INITIAL_BRIDGE_STATE);
-  const seenTopicKeysRef = useRef(new Set<VizTopicKey>());
-  const livePoseActiveRef = useRef(false);
+  const fleetBridgeStatesRef = useRef<Record<string, BridgeState>>({ burger1: INITIAL_BRIDGE_STATE });
+  const seenTopicKeysRef = useRef(new Map<string, Set<VizTopicKey>>());
+  const livePoseActiveRef = useRef(new Set<string>());
   const vizTopicsRef = useRef(vizTopics);
-  const robotIdRef = useRef(robotId);
-  const pendingBridgePatchRef = useRef<Partial<BridgeState>>({});
+  const robotIdsRef = useRef(robotIds);
+  const activeRobotIdRef = useRef(activeRobotId);
+  const pendingBridgePatchRef = useRef<Record<string, Partial<BridgeState>>>({});
   const flushBridgeFrameRef = useRef<number | null>(null);
-  const routeActiveRef = useRef(false);
-  const autoClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const activePingRequestIdRef = useRef<string | null>(null);
-  const lastPingSentAtRef = useRef<number | null>(null);
+  const routeActiveRef = useRef(new Set<string>());
+  const autoClearTimerRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const pendingPingRequestsRef = useRef(new Map<string, string>());
+  const lastPingSentAtRef = useRef<Record<string, number | null>>({});
   const modeLabel: ViewMode = viewMode === "nav" ? "navigation" : "mapping";
-  const activeTarget = useMemo(() => ({ ...target, id: robotId.trim() || target.id }), [robotId]);
-  const robotPose = bridgeState.robot_pose ?? DEFAULT_ROBOT_POSE;
+  const activeTarget = useMemo(() => ({ ...target, id: activeRobotId.trim() || target.id }), [activeRobotId]);
+  const bridgeState = fleetBridgeStates[activeRobotId] ?? {};
+  const activeRobotSceneIndex = Math.max(0, robotIds.indexOf(activeRobotId));
+  const sceneBridgeState = useMemo(
+    () => withSceneRobotPoseFallback(bridgeState, activeRobotSceneIndex),
+    [activeRobotSceneIndex, bridgeState],
+  );
+  const sceneRobotStates = useMemo(
+    () => robotIds.map((id, index) => ({
+      robotId: id,
+      state: withSceneRobotPoseFallback(fleetBridgeStates[id] ?? {}, index),
+      active: id === activeRobotId,
+      color: robotMarkerColors[id],
+    })),
+    [activeRobotId, fleetBridgeStates, robotIds, robotMarkerColors],
+  );
+  const robotPose = bridgeState.robot_pose;
   const motionStatus = bridgeState.motion_status ?? INITIAL_MOTION_STATUS;
+  const routeWaypoints = routeWaypointsByRobot[activeRobotId] ?? [];
+  const activeGoalIndex = activeGoalIndexByRobot[activeRobotId] ?? -1;
+  const sceneGoalMarker = sceneGoalMarkerByRobot[activeRobotId] ?? null;
   const connectedRobotId = connectionLabel.startsWith("MQTT connected:")
-    ? (robotId.trim() || "robot1")
+    ? activeRobotId
     : undefined;
   const batteryPercentage = (() => {
     const percentage = bridgeState.battery_state?.percentage ?? bridgeState.battery_state?.battery?.percentage ?? null;
@@ -902,28 +1085,104 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
   })();
   const signalBars = (() => {
     const client = clientRef.current;
-    if (!client?.connected || signalRttMs === null || signalLastSeenAt === null) {
+    const signal = fleetSignals[activeRobotId];
+    if (!client?.connected || !signal || signal.rttMs === null || signal.lastSeenAt === null) {
       return 0;
     }
-    if ((Date.now() - signalLastSeenAt) > 6000) {
+    if ((Date.now() - signal.lastSeenAt) > 6000) {
       return 0;
     }
-    if (signalRttMs <= 120) {
+    if (signal.rttMs <= 120) {
       return 4;
     }
-    if (signalRttMs <= 250) {
+    if (signal.rttMs <= 250) {
       return 3;
     }
-    if (signalRttMs <= 500) {
+    if (signal.rttMs <= 500) {
       return 2;
     }
     return 1;
   })();
+  const activeSignal = fleetSignals[activeRobotId];
+  const activeSignalIsFresh = Boolean(
+    clientRef.current?.connected
+      && activeSignal?.lastSeenAt != null
+      && (Date.now() - activeSignal.lastSeenAt) <= 6000,
+  );
+  const activeSignalLabel = activeSignalIsFresh && activeSignal?.rttMs !== null && activeSignal?.rttMs !== undefined
+    ? `${Math.round(activeSignal.rttMs)} ms`
+    : "--";
+  const robotSummaries = robotIds.map((id): RobotRuntimeSummary => {
+    const state = fleetBridgeStates[id] ?? {};
+    const percentage = state.battery_state?.percentage ?? state.battery_state?.battery?.percentage ?? null;
+    const normalizedBattery = percentage == null || !Number.isFinite(percentage)
+      ? null
+      : Math.max(0, Math.min(100, percentage <= 1 ? percentage * 100 : percentage));
+    const signal = fleetSignals[id];
+    const signalIsFresh = Boolean(
+      clientRef.current?.connected
+        && signal?.lastSeenAt != null
+        && (Date.now() - signal.lastSeenAt) <= 6000,
+    );
+    return {
+      robotId: id,
+      markerColor: robotMarkerColors[id] ?? ROBOT_MARKER_PALETTE[0],
+      motion: state.motion_status?.motion ?? state.motion_status?.state ?? "Idle",
+      batteryLabel: normalizedBattery == null ? DEFAULT_BATTERY_LABEL : `${Math.round(normalizedBattery)}%`,
+      signalLabel: signalIsFresh && signal?.rttMs != null ? `${Math.round(signal.rttMs)} ms` : "--",
+    };
+  });
 
-  const scheduleBridgePatch = (patch: Partial<BridgeState>) => {
+  const updateRobotWaypoints = (
+    robotId: string,
+    updater: (current: ReadonlyArray<RouteWaypoint>) => ReadonlyArray<RouteWaypoint>,
+  ) => {
+    setRouteWaypointsByRobot((current) => ({
+      ...current,
+      [robotId]: updater(current[robotId] ?? []),
+    }));
+  };
+
+  const setRobotActiveGoalIndex = (robotId: string, index: number) => {
+    setActiveGoalIndexByRobot((current) => ({
+      ...current,
+      [robotId]: index,
+    }));
+  };
+
+  const setRobotSceneGoalMarker = (robotId: string, marker: SceneGoalMarker | null) => {
+    setSceneGoalMarkerByRobot((current) => ({
+      ...current,
+      [robotId]: marker,
+    }));
+  };
+
+  const clearRouteAutoClearTimer = (robotId: string) => {
+    const timer = autoClearTimerRef.current.get(robotId);
+    if (timer != null) {
+      clearTimeout(timer);
+      autoClearTimerRef.current.delete(robotId);
+    }
+  };
+
+  const scheduleRouteAutoClear = (robotId: string, message: string) => {
+    clearRouteAutoClearTimer(robotId);
+    autoClearTimerRef.current.set(robotId, setTimeout(() => {
+      autoClearTimerRef.current.delete(robotId);
+      updateRobotWaypoints(robotId, () => []);
+      setRobotActiveGoalIndex(robotId, -1);
+      pushEvent(message);
+    }, 1500));
+  };
+
+  const scheduleRobotBridgePatch = (targetRobotId: string, patch: Partial<BridgeState>) => {
+    const normalizedRobotId = targetRobotId.trim() || "robot1";
     pendingBridgePatchRef.current = {
       ...pendingBridgePatchRef.current,
-      ...patch,
+      [normalizedRobotId]: {
+        ...(pendingBridgePatchRef.current[normalizedRobotId] ?? {}),
+        ...patch,
+      },
     };
 
     if (flushBridgeFrameRef.current != null) {
@@ -934,13 +1193,20 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
       flushBridgeFrameRef.current = null;
       const nextPatch = pendingBridgePatchRef.current;
       pendingBridgePatchRef.current = {};
-      if (Object.keys(nextPatch).length === 0) {
+      const robotPatchEntries = Object.entries(nextPatch);
+      if (robotPatchEntries.length === 0) {
         return;
       }
       startTransition(() => {
-        setBridgeState((current: BridgeState) => {
-          const nextState = { ...current, ...nextPatch };
-          bridgeStateRef.current = nextState;
+        setFleetBridgeStates((current) => {
+          const nextState = { ...current };
+          for (const [robotId, patchForRobot] of robotPatchEntries) {
+            nextState[robotId] = {
+              ...(nextState[robotId] ?? {}),
+              ...patchForRobot,
+            };
+          }
+          fleetBridgeStatesRef.current = nextState;
           return nextState;
         });
       });
@@ -948,29 +1214,59 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
   };
 
   useEffect(() => {
-    bridgeStateRef.current = bridgeState;
-  }, [bridgeState]);
+    fleetBridgeStatesRef.current = fleetBridgeStates;
+  }, [fleetBridgeStates]);
 
   useEffect(() => {
     vizTopicsRef.current = vizTopics;
   }, [vizTopics]);
 
   useEffect(() => {
-    const previousRobotId = robotIdRef.current;
-    robotIdRef.current = robotId;
+    setActiveRobotId((current) => (robotIds.includes(current) ? current : robotIds[0]));
+  }, [robotIds]);
+
+  useEffect(() => {
+    activeRobotIdRef.current = activeRobotId;
+    setPoseInteractionMode("idle");
+  }, [activeRobotId]);
+
+  useEffect(() => {
+    setRobotMarkerColors((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const robotId of robotIds) {
+        if (!next[robotId]) {
+          next[robotId] = createRobotMarkerColor(Object.values(next));
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [robotIds]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.localStorage.setItem("rcs.robotMarkerColors", JSON.stringify(robotMarkerColors));
+  }, [robotMarkerColors]);
+
+  useEffect(() => {
+    const previousRobotIds = robotIdsRef.current;
+    robotIdsRef.current = robotIds;
 
     const client = clientRef.current;
-    if (!client || !client.connected || previousRobotId === robotId) {
+    if (!client || !client.connected || previousRobotIds.join(",") === robotIds.join(",")) {
       return;
     }
 
     const previousSubs = [
-      ...buildVizSubscriptions(vizTopicsRef.current, previousRobotId),
-      ...buildControlSubscriptions(previousRobotId),
+      ...buildFleetVizSubscriptions(vizTopicsRef.current, previousRobotIds),
+      ...buildFleetControlSubscriptions(previousRobotIds),
     ];
     const nextSubs = Array.from(new Set([
-      ...buildVizSubscriptions(vizTopicsRef.current, robotId),
-      ...buildControlSubscriptions(robotId),
+      ...buildFleetVizSubscriptions(vizTopicsRef.current, robotIds),
+      ...buildFleetControlSubscriptions(robotIds),
     ]));
     if (previousSubs.length > 0) {
       client.unsubscribe(previousSubs, () => {
@@ -979,11 +1275,11 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
             pushEvent(`Robot topic scope update failed: ${error.message}`);
             return;
           }
-          pushEvent(`Robot topic scope updated: ${robotId.trim() || "robot1"}`);
+          pushEvent(`Robot topic scope updated: ${robotIds.join(", ")}`);
         });
       });
     }
-  }, [robotId]);
+  }, [robotIds]);
 
   const pushEvent = (text: string) => {
     setEvents((current) => [createEvent(text), ...current].slice(0, 24));
@@ -996,14 +1292,14 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
       return;
     }
 
-    const resolvedTopic = resolveConfiguredTopic(topic, robotId);
+    const resolvedTopic = resolveConfiguredTopic(topic, activeRobotIdRef.current);
     client.publish(resolvedTopic, JSON.stringify(payload), (error) => {
       if (error) {
         pushEvent(`${label} failed: ${error.message}`);
         return;
       }
 
-      pushEvent(`${label} published: ${resolvedTopic}`);
+      pushEvent(`[${activeRobotIdRef.current}] ${label} published: ${resolvedTopic}`);
     });
   };
 
@@ -1014,14 +1310,15 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
   };
 
   const handlePosePlacement = (mode: "goal" | "initial_pose", x: number, y: number, yaw: number) => {
+    const targetRobotId = activeRobotIdRef.current;
     if (mode === "goal") {
-      setRouteWaypoints((current) => [...current, { x, y, yaw }]);
-      pushEvent(`Waypoint added: (${x.toFixed(2)}, ${y.toFixed(2)}, ${yaw.toFixed(2)})`);
+      updateRobotWaypoints(targetRobotId, (current) => [...current, { x, y, yaw }]);
+      pushEvent(`[${targetRobotId}] Waypoint added: (${x.toFixed(2)}, ${y.toFixed(2)}, ${yaw.toFixed(2)})`);
       return;
     }
 
     setPoseInteractionMode("idle");
-    setSceneGoalMarker({
+    setRobotSceneGoalMarker(targetRobotId, {
       x,
       y,
       yaw,
@@ -1039,39 +1336,40 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
   };
 
   const handleSendRoute = () => {
-    if (routeWaypoints.length === 0) {
+    const targetRobotId = activeRobotIdRef.current;
+    const targetWaypoints = routeWaypointsByRobot[targetRobotId] ?? [];
+    if (targetWaypoints.length === 0) {
       return;
     }
 
     publishCommand(commandTopics.navigationCommand, {
       request_id: createCommandId(),
-      goal_poses: routeWaypoints.map(({ x, y, yaw }) => ({
+      goal_poses: targetWaypoints.map(({ x, y, yaw }) => ({
         frame: "map",
         position: { x, y, z: 0 },
         orientation: createQuaternionFromYaw(yaw),
       })),
     }, "Navigate To Poses");
-    setActiveGoalIndex(-1);
-    routeActiveRef.current = true;
+    setRobotActiveGoalIndex(targetRobotId, -1);
+    routeActiveRef.current.add(targetRobotId);
     setPoseInteractionMode("idle");
   };
 
   useEffect(() => {
+    const targetRobotId = activeRobotIdRef.current;
     if (
-      routeActiveRef.current &&
+      routeActiveRef.current.has(targetRobotId) &&
       routeWaypoints.length > 0 &&
       activeGoalIndex >= routeWaypoints.length
     ) {
-      routeActiveRef.current = false;
-      if (autoClearTimerRef.current != null) {
-        clearTimeout(autoClearTimerRef.current);
-      }
-      autoClearTimerRef.current = setTimeout(() => {
-        autoClearTimerRef.current = null;
-        setRouteWaypoints([]);
-        setActiveGoalIndex(-1);
+      routeActiveRef.current.delete(targetRobotId);
+      clearRouteAutoClearTimer(targetRobotId);
+      autoClearTimerRef.current.set(targetRobotId, setTimeout(() => {
+        autoClearTimerRef.current.delete(targetRobotId);
+        updateRobotWaypoints(targetRobotId, () => []);
+        setRobotActiveGoalIndex(targetRobotId, -1);
         pushEvent("Route completed – waypoints cleared automatically");
-      }, 1500);
+      }, 1500));
     }
   }, [activeGoalIndex, routeWaypoints.length]);
 
@@ -1084,8 +1382,8 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
       return;
     }
 
-    const previousList = buildVizSubscriptions(previousTopics, robotId);
-    const nextList = buildVizSubscriptions(nextTopics, robotId);
+    const previousList = buildFleetVizSubscriptions(previousTopics, robotIdsRef.current);
+    const nextList = buildFleetVizSubscriptions(nextTopics, robotIdsRef.current);
     const topicsToUnsubscribe = previousList.filter((topic) => !nextList.includes(topic));
 
     if (topicsToUnsubscribe.length > 0) {
@@ -1119,12 +1417,16 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
       clientRef.current = null;
     }
 
-    livePoseActiveRef.current = false;
+    livePoseActiveRef.current.clear();
     seenTopicKeysRef.current.clear();
-    activePingRequestIdRef.current = null;
-    lastPingSentAtRef.current = null;
-    setSignalRttMs(null);
-    setSignalLastSeenAt(null);
+    pendingPingRequestsRef.current.clear();
+    lastPingSentAtRef.current = {};
+    routeActiveRef.current.clear();
+    for (const timer of autoClearTimerRef.current.values()) {
+      clearTimeout(timer);
+    }
+    autoClearTimerRef.current.clear();
+    setFleetSignals({});
     setConnectionLabel("Disconnected");
     pushEvent(message ?? `MQTT disconnected: ${mqttUrl}`);
   };
@@ -1154,8 +1456,9 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
       setConnectionLabel(`MQTT connected: ${mqttUrl}`);
       pushEvent(`MQTT connected: ${mqttUrl}`);
 
-      const vizSubs = buildVizSubscriptions(vizTopicsRef.current, robotId);
-      const controlSubs = buildControlSubscriptions(robotId);
+      const currentRobotIds = robotIdsRef.current;
+      const vizSubs = buildFleetVizSubscriptions(vizTopicsRef.current, currentRobotIds);
+      const controlSubs = buildFleetControlSubscriptions(currentRobotIds);
       const allSubs = Array.from(new Set([...vizSubs, ...controlSubs]));
 
       client.subscribe(allSubs, (error) => {
@@ -1163,15 +1466,14 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
           pushEvent(`Subscribe failed: ${error.message}`);
           return;
         }
-        pushEvent(`Subscribed: ${vizSubs.length} telemetry + ${controlSubs.length} control topics`);
+        pushEvent(`Subscribed: ${currentRobotIds.join(", ")} (${vizSubs.length} viz + ${controlSubs.length} control topics)`);
       });
     });
 
     client.on("error", (error) => {
-      activePingRequestIdRef.current = null;
-      lastPingSentAtRef.current = null;
-      setSignalRttMs(null);
-      setSignalLastSeenAt(null);
+      pendingPingRequestsRef.current.clear();
+      lastPingSentAtRef.current = {};
+      setFleetSignals({});
       setConnectionLabel("Connection error");
       pushEvent(`MQTT error: ${error.message}`);
     });
@@ -1181,39 +1483,47 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
         clientRef.current = null;
       }
 
-      livePoseActiveRef.current = false;
-      activePingRequestIdRef.current = null;
-      lastPingSentAtRef.current = null;
-      setSignalRttMs(null);
-      setSignalLastSeenAt(null);
+      livePoseActiveRef.current.clear();
+      pendingPingRequestsRef.current.clear();
+      lastPingSentAtRef.current = {};
+      setFleetSignals({});
       setConnectionLabel("Disconnected");
       pushEvent(`MQTT closed: ${mqttUrl}`);
     });
 
     client.on("message", (topic, payload) => {
-      const rid = robotId.trim() || "robot1";
+      const rid = extractTopicRobotId(topic);
       const text = payload.toString("utf8").trim();
 
       // ── system/result  (ping response + other system ACKs) ──────────────
       if (buildTopicVariants(`/amr/${rid}/system/result`).includes(topic)) {
         const rec = extractRecord(safeParseJsonPayload(text));
         const requestId = typeof rec?.request_id === "string" ? rec.request_id : "";
-        const sentAtMs = coerceNumber(rec?.sent_at_ms) ?? lastPingSentAtRef.current;
-        if (requestId && requestId === activePingRequestIdRef.current && sentAtMs != null) {
-          setSignalRttMs(Math.max(0, Date.now() - sentAtMs));
-          setSignalLastSeenAt(Date.now());
-          activePingRequestIdRef.current = null;
+        const sentAtMs = coerceNumber(rec?.sent_at_ms) ?? lastPingSentAtRef.current[rid];
+        if (
+          requestId
+          && pendingPingRequestsRef.current.get(rid) === requestId
+          && sentAtMs != null
+        ) {
+          setFleetSignals((current) => ({
+            ...current,
+            [rid]: {
+              rttMs: Math.max(0, Date.now() - sentAtMs),
+              lastSeenAt: Date.now(),
+            },
+          }));
+          pendingPingRequestsRef.current.delete(rid);
         }
         return;
       }
 
       // ── navigation/feedback ─────────────────────────────────────────────
       if (buildTopicVariants(`/amr/${rid}/navigation/feedback`).includes(topic)) {
-        if (routeActiveRef.current) {
+        if (routeActiveRef.current.has(rid)) {
           const rec = extractRecord(safeParseJsonPayload(text));
           if (rec && typeof rec.current_goal_index === "number") {
             const fb = rec as NavigateToPosesFeedbackMessage;
-            setActiveGoalIndex(fb.current_goal_index);
+            setRobotActiveGoalIndex(rid, fb.current_goal_index);
           }
         }
         return;
@@ -1229,24 +1539,24 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
             1: "Idle", 2: "Executing", 3: "Canceling", 4: "Succeeded", 5: "Canceled", 6: "Aborted",
           };
           const label = GOAL_STATUS_LABEL[code] ?? "Idle";
-          scheduleBridgePatch({
+          scheduleRobotBridgePatch(rid, {
             motion_status: {
-              ...(bridgeStateRef.current.motion_status ?? INITIAL_MOTION_STATUS),
+              ...(fleetBridgeStatesRef.current[rid]?.motion_status ?? INITIAL_MOTION_STATUS),
               goal_state: label,
             },
           });
           // Auto-clear paths and waypoints on any terminal state
-          if ((code === 4 || code === 5 || code === 6) && routeActiveRef.current) {
-            routeActiveRef.current = false;
+          if ((code === 4 || code === 5 || code === 6) && routeActiveRef.current.has(rid)) {
+            routeActiveRef.current.delete(rid);
             // Clear global/local plan from scene immediately
-            scheduleBridgePatch({ global_path: undefined, local_path: undefined });
-            if (autoClearTimerRef.current != null) clearTimeout(autoClearTimerRef.current);
-            autoClearTimerRef.current = setTimeout(() => {
-              autoClearTimerRef.current = null;
-              setRouteWaypoints([]);
-              setActiveGoalIndex(-1);
+            scheduleRobotBridgePatch(rid, { global_path: undefined, local_path: undefined });
+            clearRouteAutoClearTimer(rid);
+            autoClearTimerRef.current.set(rid, setTimeout(() => {
+              autoClearTimerRef.current.delete(rid);
+              updateRobotWaypoints(rid, () => []);
+              setRobotActiveGoalIndex(rid, -1);
               pushEvent(`Route ${label.toLowerCase()} – waypoints cleared automatically`);
-            }, 1500);
+            }, 1500));
           }
         }
         return;
@@ -1257,14 +1567,14 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
         const rec = extractRecord(safeParseJsonPayload(text));
         if (rec) {
           const res = rec as NavigateToPosesResponseMessage;
-          if (res.completed && routeActiveRef.current) {
+          if (res.completed && routeActiveRef.current.has(rid)) {
             // Final route result – clear paths and mark waypoints done
-            scheduleBridgePatch({ global_path: undefined, local_path: undefined });
-            setActiveGoalIndex(res.completed_goals ?? Number.MAX_SAFE_INTEGER);
+            scheduleRobotBridgePatch(rid, { global_path: undefined, local_path: undefined });
+            setRobotActiveGoalIndex(rid, res.completed_goals ?? Number.MAX_SAFE_INTEGER);
           }
-          if (res.accepted === false && typeof res.message === "string") {
+          if (res.accepted === false && rid === activeRobotIdRef.current && typeof res.message === "string") {
             pushEvent(`Navigation rejected: ${res.message}`);
-            routeActiveRef.current = false;
+            routeActiveRef.current.delete(rid);
           }
         }
         return;
@@ -1317,104 +1627,106 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
 
       const parsedPayload = safeParseJsonPayload(text);
       const effectivePayload = matchingKey === "robotDescription" && parsedPayload == null ? text : parsedPayload;
+      const seenTopicKeys = seenTopicKeysRef.current.get(rid) ?? new Set<VizTopicKey>();
+      seenTopicKeysRef.current.set(rid, seenTopicKeys);
       if (effectivePayload == null) {
-        if (!seenTopicKeysRef.current.has(matchingKey)) {
-          seenTopicKeysRef.current.add(matchingKey);
-          pushEvent(`${vizTopicDefinitions.find((entry) => entry.key === matchingKey)?.label ?? matchingKey} payload is not JSON`);
+        if (!seenTopicKeys.has(matchingKey)) {
+          seenTopicKeys.add(matchingKey);
+          pushEvent(`[${rid}] ${vizTopicDefinitions.find((entry) => entry.key === matchingKey)?.label ?? matchingKey} payload is not JSON`);
         }
         return;
       }
 
-      if (!seenTopicKeysRef.current.has(matchingKey)) {
-        seenTopicKeysRef.current.add(matchingKey);
-        pushEvent(`${vizTopicDefinitions.find((entry) => entry.key === matchingKey)?.label ?? matchingKey} stream online`);
+      if (!seenTopicKeys.has(matchingKey)) {
+        seenTopicKeys.add(matchingKey);
+        pushEvent(`[${rid}] ${vizTopicDefinitions.find((entry) => entry.key === matchingKey)?.label ?? matchingKey} stream online`);
       }
 
       switch (matchingKey) {
         case "map": {
           const nextMap = parseOccupancyGrid(effectivePayload);
           if (nextMap) {
-            scheduleBridgePatch({ map: nextMap });
+            scheduleRobotBridgePatch(rid, { map: nextMap });
           }
           break;
         }
         case "globalCostmap": {
           const nextGrid = parseOccupancyGrid(effectivePayload);
           if (nextGrid) {
-            scheduleBridgePatch({ global_costmap: nextGrid });
+            scheduleRobotBridgePatch(rid, { global_costmap: nextGrid });
           }
           break;
         }
         case "localCostmap": {
           const nextGrid = parseOccupancyGrid(effectivePayload);
           if (nextGrid) {
-            scheduleBridgePatch({ local_costmap: nextGrid });
+            scheduleRobotBridgePatch(rid, { local_costmap: nextGrid });
           }
           break;
         }
         case "robotPose": {
           const nextPose = parsePose(effectivePayload);
           if (nextPose) {
-            livePoseActiveRef.current = true;
-            scheduleBridgePatch({ robot_pose: nextPose });
+            livePoseActiveRef.current.add(rid);
+            scheduleRobotBridgePatch(rid, { robot_pose: nextPose });
           }
           break;
         }
         case "globalPath": {
           const nextPath = parsePathMessage(effectivePayload);
           if (nextPath) {
-            scheduleBridgePatch({ global_path: nextPath });
+            scheduleRobotBridgePatch(rid, { global_path: nextPath });
           }
           break;
         }
         case "localPath": {
           const nextPath = parsePathMessage(effectivePayload);
           if (nextPath) {
-            scheduleBridgePatch({ local_path: nextPath });
+            scheduleRobotBridgePatch(rid, { local_path: nextPath });
           }
           break;
         }
         case "scan": {
           const nextScan = parseLaserScan(effectivePayload);
           if (nextScan) {
-            scheduleBridgePatch({ scan: nextScan });
+            scheduleRobotBridgePatch(rid, { scan: nextScan });
           }
           break;
         }
         case "motionStatus": {
           const nextStatus = parseMotionStatus(effectivePayload);
           if (nextStatus) {
-            scheduleBridgePatch({ motion_status: nextStatus });
+            scheduleRobotBridgePatch(rid, { motion_status: nextStatus });
           }
           break;
         }
         case "batteryState": {
           const nextBattery = parseBatteryState(effectivePayload);
           if (nextBattery) {
-            scheduleBridgePatch({ battery_state: nextBattery });
+            scheduleRobotBridgePatch(rid, { battery_state: nextBattery });
           }
           break;
         }
         case "tf": {
           const nextTf = parseTfMessage(effectivePayload);
           if (nextTf) {
-            const pendingTf = pendingBridgePatchRef.current.tf ?? bridgeStateRef.current.tf;
-            scheduleBridgePatch({ tf: mergeTfMessages(pendingTf, nextTf) });
+            const pendingTf = pendingBridgePatchRef.current[rid]?.tf ?? fleetBridgeStatesRef.current[rid]?.tf;
+            scheduleRobotBridgePatch(rid, { tf: mergeTfMessages(pendingTf, nextTf) });
           }
           break;
         }
         case "tfStatic": {
           const nextTfStatic = parseTfMessage(effectivePayload);
           if (nextTfStatic) {
-            const pendingTfStatic = pendingBridgePatchRef.current.tf_static ?? bridgeStateRef.current.tf_static;
-            scheduleBridgePatch({ tf_static: mergeTfMessages(pendingTfStatic, nextTfStatic) });
+            const pendingTfStatic = pendingBridgePatchRef.current[rid]?.tf_static ?? fleetBridgeStatesRef.current[rid]?.tf_static;
+            scheduleRobotBridgePatch(rid, { tf_static: mergeTfMessages(pendingTfStatic, nextTfStatic) });
           }
           break;
         }
         case "robotDescription": {
           const nextDescription = parseRobotDescription(effectivePayload);
           if (nextDescription) {
-            scheduleBridgePatch({ robot_description: nextDescription });
+            scheduleRobotBridgePatch(rid, { robot_description: nextDescription });
           }
           break;
         }
@@ -1446,20 +1758,25 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
     }
 
     const publishPing = () => {
-      const requestId = createCommandId();
       const sentAtMs = Date.now();
-      activePingRequestIdRef.current = requestId;
-      lastPingSentAtRef.current = sentAtMs;
-      publishCommand(commandTopics.systemPing, {
-        request_id: requestId,
-        sent_at_ms: sentAtMs,
-      }, "System Ping");
+      const nextSentAt = { ...lastPingSentAtRef.current };
+      for (const targetRobotId of robotIdsRef.current) {
+        const requestId = createCommandId();
+        pendingPingRequestsRef.current.set(targetRobotId, requestId);
+        nextSentAt[targetRobotId] = sentAtMs;
+        const topic = resolveConfiguredTopic(commandTopics.systemPing, targetRobotId);
+        client.publish(topic, JSON.stringify({
+          request_id: requestId,
+          sent_at_ms: sentAtMs,
+        }));
+      }
+      lastPingSentAtRef.current = nextSentAt;
     };
 
     publishPing();
     const intervalId = window.setInterval(publishPing, 2500);
     return () => window.clearInterval(intervalId);
-  }, [connectionLabel, robotId]);
+  }, [connectionLabel, robotIds, commandTopics.systemPing]);
 
   useEffect(() => {
     // When both axes are zero there is nothing to integrate – skip the loop entirely.
@@ -1480,9 +1797,11 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
         angular_z: teleopAngularZ,
       }, "Motion Command");
 
-      if (!livePoseActiveRef.current) {
-        setBridgeState((current: BridgeState) => {
-          const currentPose = current.robot_pose ?? DEFAULT_ROBOT_POSE;
+      const targetRobotId = activeRobotIdRef.current;
+      if (!livePoseActiveRef.current.has(targetRobotId)) {
+        setFleetBridgeStates((current) => {
+          const currentState = current[targetRobotId] ?? INITIAL_BRIDGE_STATE;
+          const currentPose = currentState.robot_pose ?? DEFAULT_ROBOT_POSE;
           if (Math.abs(teleopLinearX) < 0.0001 && Math.abs(teleopAngularZ) < 0.0001) {
             return current;
           }
@@ -1491,14 +1810,19 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
           const nextX = currentPose.position.x + (Math.cos(nextYaw) * teleopLinearX * PREVIEW_LINEAR_SCALE * deltaSeconds);
           const nextY = currentPose.position.y + (Math.sin(nextYaw) * teleopLinearX * PREVIEW_LINEAR_SCALE * deltaSeconds);
 
-          return {
+          const nextState = {
             ...current,
-            robot_pose: createScenePose(
-              clamp(nextX, -5.5, 5.5),
-              clamp(nextY, -5.5, 5.5),
-              nextYaw,
-            ),
+            [targetRobotId]: {
+              ...currentState,
+              robot_pose: createScenePose(
+                clamp(nextX, -5.5, 5.5),
+                clamp(nextY, -5.5, 5.5),
+                nextYaw,
+              ),
+            },
           };
+          fleetBridgeStatesRef.current = nextState;
+          return nextState;
         });
       }
 
@@ -1518,11 +1842,11 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
       <Topbar
         productName={productName}
         connectionLabel={connectionLabel}
-        poseLabel={formatPoseChip(robotPose.position.x, robotPose.position.y, robotPose.orientation.yaw)}
+        poseLabel={robotPose ? formatPoseChip(robotPose.position.x, robotPose.position.y, robotPose.orientation.yaw) : "Pose --"}
         viewMode={viewMode}
         onViewModeChange={setViewMode}
         signalBars={signalBars}
-        signalLabel={signalRttMs !== null ? `${Math.round(signalRttMs)} ms` : "--"}
+        signalLabel={activeSignalLabel}
         batteryPercentage={batteryPercentage}
         batteryLabel={batteryPercentage !== null ? `${Math.round(batteryPercentage)}%` : DEFAULT_BATTERY_LABEL}
       />
@@ -1531,9 +1855,11 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
         <aside className="rcs-sidebar rcs-sidebar--left">
           <MqttPanel
             mqttUrl={mqttUrl}
-            robotId={robotId}
+            activeRobotId={activeRobotId}
+            robotSummaries={robotSummaries}
             onMqttUrlChange={setMqttUrl}
-            onRobotIdChange={setRobotId}
+            onActiveRobotChange={setActiveRobotId}
+            onOpenRobotManager={() => setRobotManagerOpen(true)}
             onConnect={connectMqtt}
             onDisconnect={() => disconnectMqtt()}
           />
@@ -1547,25 +1873,28 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
                 if (current === "goal") {
                   return "idle";
                 }
-                pushEvent("Route mode: drag on the map to place waypoints");
+                pushEvent(`[${activeRobotIdRef.current}] Route mode: drag on the map to place waypoints`);
                 return "goal";
               });
             }}
             onRemoveWaypoint={(index) => {
-              setRouteWaypoints((current) => current.filter((_, i) => i !== index));
+              const targetRobotId = activeRobotIdRef.current;
+              updateRobotWaypoints(targetRobotId, (current) => current.filter((_, i) => i !== index));
             }}
             onClearWaypoints={() => {
-              if (autoClearTimerRef.current != null) { clearTimeout(autoClearTimerRef.current); autoClearTimerRef.current = null; }
-              routeActiveRef.current = false;
-              setActiveGoalIndex(-1);
-              setRouteWaypoints([]);
-              pushEvent("Route waypoints cleared");
+              const targetRobotId = activeRobotIdRef.current;
+              clearRouteAutoClearTimer(targetRobotId);
+              routeActiveRef.current.delete(targetRobotId);
+              setRobotActiveGoalIndex(targetRobotId, -1);
+              updateRobotWaypoints(targetRobotId, () => []);
+              pushEvent(`[${targetRobotId}] Route waypoints cleared`);
             }}
             onSendRoute={handleSendRoute}
             onCancelRoute={() => {
-              if (autoClearTimerRef.current != null) { clearTimeout(autoClearTimerRef.current); autoClearTimerRef.current = null; }
-              routeActiveRef.current = false;
-              setActiveGoalIndex(-1);
+              const targetRobotId = activeRobotIdRef.current;
+              clearRouteAutoClearTimer(targetRobotId);
+              routeActiveRef.current.delete(targetRobotId);
+              setRobotActiveGoalIndex(targetRobotId, -1);
               setPoseInteractionMode("idle");
               publishCommand(commandTopics.navigationCancel, {
                 request_id: createCommandId(),
@@ -1575,8 +1904,9 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
               setPoseInteractionMode((current) => {
                 const nextMode = current === "initial_pose" ? "idle" : "initial_pose";
                 if (nextMode === "initial_pose") {
-                  setSceneGoalMarker(null);
-                  pushEvent("Set Initial Pose armed: drag on the map to place the pose");
+                  const targetRobotId = activeRobotIdRef.current;
+                  setRobotSceneGoalMarker(targetRobotId, null);
+                  pushEvent(`[${targetRobotId}] Set Initial Pose armed: drag on the map to place the pose`);
                 }
                 return nextMode;
               });
@@ -1599,7 +1929,8 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
         <div className="rcs-center-column">
           <SceneViewport
             target={activeTarget}
-            state={bridgeState}
+            state={sceneBridgeState}
+            robotStates={sceneRobotStates}
             viewMode={modeLabel}
             onResetView={() => setSceneResetToken((current) => current + 1)}
             resetViewToken={sceneResetToken}
@@ -1614,9 +1945,10 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
 
         <aside className="rcs-sidebar rcs-sidebar--right">
           <NavigationStatusPanel
-            motion={motionStatus.motion}
+            targetRobotId={activeRobotId}
+            motion={motionStatus.motion ?? "Idle"}
             remainingLabel={formatDistance(motionStatus.remaining_distance ?? null)}
-            headingLabel={formatHeading(motionStatus.heading)}
+            headingLabel={formatHeading(motionStatus.heading ?? null)}
             goalLabel={motionStatus.goal_state ?? "Idle"}
             blockedSourceLabel={motionStatus.blocked_source ?? "Clear"}
           />
@@ -1650,6 +1982,22 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
           setCommandTopics(sanitizeTopicRecord(defaultCommandTopics, nextValues));
           setCommandSettingsOpen(false);
           pushEvent("Command topic settings saved");
+        }}
+      />
+
+      <RobotManagerModal
+        open={robotManagerOpen}
+        robotIds={robotIds}
+        activeRobotId={activeRobotId}
+        robotSummaries={robotSummaries}
+        connected={connectionLabel.startsWith("MQTT connected:")}
+        onClose={() => setRobotManagerOpen(false)}
+        onSave={(nextRobotIds, nextActiveRobotId) => {
+          const sanitizedRobotIds = parseRobotIds(nextRobotIds.join(","));
+          setRobotIdsInput(sanitizedRobotIds.join(", "));
+          setActiveRobotId(sanitizedRobotIds.includes(nextActiveRobotId) ? nextActiveRobotId : sanitizedRobotIds[0]);
+          setRobotManagerOpen(false);
+          pushEvent(`Robot fleet updated: ${sanitizedRobotIds.join(", ")}`);
         }}
       />
 

@@ -85,7 +85,8 @@ button {
   cursor: pointer;
 }
 
-input:not([type="checkbox"]) {
+input:not([type="checkbox"]),
+select {
   width: 100%;
   min-width: 0;
   border: 1px solid var(--line-strong);
@@ -97,6 +98,19 @@ input:not([type="checkbox"]) {
 
 input:not([type="checkbox"])::placeholder {
   color: var(--muted);
+}
+
+select {
+  appearance: none;
+  padding-right: 26px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 50%,
+    calc(100% - 9px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
 }
 
 /* ─────────────────────────── Shell ─────────────────────────── */
@@ -427,6 +441,131 @@ input:not([type="checkbox"])::placeholder {
 
 /* ─────────────────────────── Buttons (icon / ghost) ─────────────────────────── */
 
+.rcs-robot-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.rcs-robot-list__item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 2px 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  background: #f7f7f7;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.rcs-robot-list__item:hover {
+  border-color: #d49b22;
+}
+
+.rcs-robot-list__item.is-active {
+  border-color: #e49b12;
+  background: #fff4d8;
+  color: #151515;
+}
+
+.rcs-robot-list__dot {
+  width: 7px;
+  height: 7px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: #aab2bb;
+}
+
+.rcs-robot-list__item.is-active .rcs-robot-list__dot {
+  background: #1fa84f;
+}
+
+.rcs-robot-list__name {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.rcs-robot-list__item.is-active .rcs-robot-list__name {
+  color: #111111;
+}
+
+.rcs-robot-list__meta {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.rcs-robot-list__item.is-active .rcs-robot-list__meta {
+  color: #202020;
+}
+
+.rcs-robot-list__arrow {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  align-self: center;
+  display: inline-flex;
+  width: 22px;
+  height: 28px;
+  opacity: 0.92;
+}
+
+.rcs-robot-list__arrow svg {
+  width: 22px;
+  height: 28px;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  fill: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.rcs-robot-list__arrow circle,
+.rcs-robot-list__arrow path:not(:last-child) {
+  fill: none;
+}
+
+.rcs-control-target {
+  margin-top: 8px;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  background: #f7f7f7;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.rcs-control-target strong {
+  color: var(--text);
+}
+
+.rcs-control-target--selector {
+  display: grid;
+  gap: 6px;
+}
+
+.rcs-control-target--selector label {
+  display: grid;
+  gap: 4px;
+}
+
+.rcs-control-target__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.rcs-control-target__meta strong {
+  color: var(--accent);
+  font-size: 11px;
+}
+
 .rcs-icon-button,
 .rcs-ghost-button {
   display: inline-flex;
@@ -464,6 +603,10 @@ input:not([type="checkbox"])::placeholder {
 
 .rcs-icon-button:hover {
   color: var(--text);
+}
+
+.rcs-add-icon-button {
+  color: var(--accent);
 }
 
 .rcs-ghost-button:hover {
@@ -1050,6 +1193,65 @@ input:not([type="checkbox"])::placeholder {
 }
 
 /* ─────────────────────────── Close button ─────────────────────────── */
+
+.rcs-modal--robot-manager {
+  width: min(620px, calc(100vw - 40px));
+}
+
+.rcs-robot-manager__add-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 88px;
+  gap: 8px;
+  align-items: end;
+}
+
+.rcs-robot-manager__error {
+  border: 1px solid var(--danger-line);
+  background: rgba(80, 24, 24, 0.42);
+  color: #f08080;
+  padding: 7px 8px;
+  font-size: 11px;
+}
+
+.rcs-robot-manager__list {
+  display: grid;
+  gap: 8px;
+}
+
+.rcs-robot-manager__item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 76px 76px;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid var(--line);
+  background: #141820;
+}
+
+.rcs-robot-manager__item.is-active {
+  border-color: var(--accent);
+  background: rgba(230, 163, 53, 0.11);
+}
+
+.rcs-robot-manager__identity {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.rcs-robot-manager__identity strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.rcs-robot-manager__identity span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.rcs-robot-manager__remove {
+  padding-inline: 8px;
+}
 
 .rcs-close-button {
   display: inline-flex;

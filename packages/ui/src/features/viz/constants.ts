@@ -37,7 +37,7 @@ export const DEFAULT_ROBOT_POSE = createScenePose(-0.4, -0.1, 0);
 export const INITIAL_MOTION_STATUS: MotionStatusMessage = {
   motion: "Idle",
   remaining_distance: undefined,
-  heading: null,
+  heading: undefined,
   goal_state: "Idle",
   blocked_source: "Clear",
 };

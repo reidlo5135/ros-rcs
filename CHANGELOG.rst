@@ -4,6 +4,11 @@ Changelog
 2026-04-10
 ----------
 
+- Started the ``0.1.7`` iteration:
+
+  - began multi-robot fleet visualization on a single MQTT broker and shared scene canvas
+  - scoped control actions to one selected active robot while allowing multiple robot topics to be displayed together
+
 - Started the ``0.1.2`` iteration:
 
   - merged the shared ``scene3d`` viewer package back into ``packages/ui`` to simplify the workspace structure

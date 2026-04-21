@@ -55,7 +55,7 @@ export function CommandPanel({
               }`}
             >
               <span className="rcs-waypoint-index">
-                {index < activeGoalIndex ? "✓" : index === activeGoalIndex ? "●" : index + 1}
+                {index < activeGoalIndex ? "Done" : index === activeGoalIndex ? "Now" : index + 1}
               </span>
               <span className="rcs-waypoint-coords">
                 <span className="rcs-waypoint-label">x</span>{wp.x.toFixed(2)}
@@ -68,7 +68,7 @@ export function CommandPanel({
                 onClick={() => onRemoveWaypoint(index)}
                 aria-label={`Remove waypoint ${index + 1}`}
               >
-                ×
+                X
               </button>
             </li>
           ))}
@@ -81,7 +81,9 @@ export function CommandPanel({
         onClick={onAddWaypoint}
       >
         {isAddingWaypoint ? (
-          <><span className="rcs-pulse-dot" aria-hidden="true">●</span>{" "}Placing…</>
+          <>
+            <span className="rcs-pulse-dot" aria-hidden="true" /> Placing...
+          </>
         ) : (
           "+ Add Waypoint"
         )}

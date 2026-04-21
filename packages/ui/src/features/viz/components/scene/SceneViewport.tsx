@@ -16,6 +16,12 @@ import type {
 type SceneViewportProps = {
   target: SessionTarget;
   state: BridgeState;
+  robotStates?: ReadonlyArray<{
+    robotId: string;
+    state: BridgeState;
+    active?: boolean;
+    color?: string;
+  }>;
   viewMode: ViewMode;
   onResetView?: () => void;
   resetViewToken?: number;
@@ -99,6 +105,34 @@ const ROBOT_LOCAL_ORIGIN_POSE: Pose = {
 
 const urdfVisualCache = new Map<string, UrdfVisual[]>();
 const urdfFrameLookupCache = new Map<string, Map<string, FrameEdge>>();
+
+const DEFAULT_SCENE_CAMERA_FOV = 28;
+const DEFAULT_SCENE_CAMERA_ZOOM = 0.72;
+const DEFAULT_SCENE_CAMERA_HEIGHT = 16;
+const DEFAULT_SCENE_CAMERA_BACK_OFFSET = 14.5;
+
+function applyDefaultSceneCamera(
+  camera: THREE.PerspectiveCamera,
+  controls: OrbitControls | null,
+  targetX: number,
+  targetZ: number,
+) {
+  camera.fov = DEFAULT_SCENE_CAMERA_FOV;
+  camera.zoom = DEFAULT_SCENE_CAMERA_ZOOM;
+  camera.up.set(0, 1, 0);
+  camera.position.set(
+    targetX,
+    DEFAULT_SCENE_CAMERA_HEIGHT,
+    targetZ + DEFAULT_SCENE_CAMERA_BACK_OFFSET,
+  );
+  camera.lookAt(targetX, 0, targetZ);
+  camera.updateProjectionMatrix();
+
+  if (controls) {
+    controls.target.set(targetX, 0, targetZ);
+    controls.update();
+  }
+}
 
 function rotate2d(x: number, y: number, yaw: number) {
   const cosYaw = Math.cos(yaw);
@@ -1598,9 +1632,182 @@ function buildRobotModelGroup(
   return group;
 }
 
+const FLEET_COLORS = ["#ff9f1c", "#2ec4b6", "#4d96ff", "#a3e635", "#f472b6", "#facc15"];
+
+function getFleetColor(index: number, explicitColor?: string) {
+  return explicitColor ?? FLEET_COLORS[index % FLEET_COLORS.length];
+}
+
+function setObjectOpacity(object: THREE.Object3D, opacity: number) {
+  object.traverse((child) => {
+    if (!(child instanceof THREE.Mesh) && !(child instanceof THREE.Line) && !(child instanceof THREE.Points)) {
+      return;
+    }
+    const materials = Array.isArray(child.material) ? child.material : [child.material];
+    for (const material of materials) {
+      material.transparent = true;
+      material.opacity = Math.min(material.opacity, opacity);
+      material.depthWrite = false;
+    }
+  });
+}
+
+function buildRobotArrowMarker(color: string, active = false) {
+  const group = new THREE.Group();
+  const renderOrder = active ? 84 : 74;
+  const baseY = active ? 0.42 : 0.36;
+  const height = active ? 0.46 : 0.37;
+  const shaftRadius = active ? 0.025 : 0.02;
+  const tipRadius = active ? 0.095 : 0.075;
+  const tipLength = active ? 0.14 : 0.11;
+
+  const shaft = new THREE.Mesh(
+    new THREE.CylinderGeometry(shaftRadius, shaftRadius, height, 18),
+    new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: active ? 0.92 : 0.76,
+      depthTest: false,
+      depthWrite: false,
+    }),
+  );
+  shaft.position.y = baseY + tipLength + (height / 2);
+  shaft.renderOrder = renderOrder + 1;
+
+  const tip = new THREE.Mesh(
+    new THREE.ConeGeometry(tipRadius, tipLength, 24),
+    new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: active ? 1 : 0.86,
+      depthTest: false,
+      depthWrite: false,
+    }),
+  );
+  tip.rotation.x = Math.PI;
+  tip.position.y = baseY + (tipLength / 2);
+  tip.renderOrder = renderOrder + 2;
+
+  const cap = new THREE.Mesh(
+    new THREE.SphereGeometry(active ? 0.055 : 0.044, 18, 18),
+    new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: active ? 0.98 : 0.82,
+      depthTest: false,
+      depthWrite: false,
+    }),
+  );
+  cap.position.y = baseY + tipLength + height;
+  cap.renderOrder = renderOrder + 3;
+
+  group.add(shaft, tip, cap);
+  return group;
+}
+
+function buildFleetOverlay(
+  robots: NonNullable<SceneViewportProps["robotStates"]>,
+  layerVisibility: SceneViewportProps["layerVisibility"],
+) {
+  const group = new THREE.Group();
+
+  robots.forEach((robot, index) => {
+    if (robot.active) {
+      return;
+    }
+
+    const robotPose = resolveRobotScenePose(
+      robot.state.tf,
+      robot.state.tf_static,
+      robot.state.robot_pose,
+      robot.state.robot_description?.data,
+    );
+    if (!robotPose) {
+      return;
+    }
+
+    const color = getFleetColor(index, robot.color);
+    const robotGroup = new THREE.Group();
+    robotGroup.userData.robotId = robot.robotId;
+
+    if (layerVisibility.robot) {
+      const model = buildRobotModelGroup(
+        robot.state.robot_description?.data,
+        undefined,
+        robot.state.tf_static,
+        ROBOT_LOCAL_ORIGIN_POSE,
+      );
+      setObjectOpacity(model, 0.62);
+      model.position.set(robotPose.position.x, 0, -robotPose.position.y);
+      model.rotation.set(0, robotPose.orientation.yaw, 0);
+      robotGroup.add(model);
+
+      const marker = buildRobotArrowMarker(color);
+      marker.position.set(robotPose.position.x, 0, -robotPose.position.y);
+      robotGroup.add(marker);
+    }
+
+    if (layerVisibility.footprint) {
+      const footprint = buildFootprintOverlay(
+        robot.state.robot_description?.footprint_polygon,
+        robotPose,
+        {
+          fillColor: color,
+          outlineColor: color,
+          fillOpacity: 0.08,
+          yOffset: 0.05,
+          renderOrder: 18,
+        },
+      );
+      if (footprint) {
+        robotGroup.add(footprint);
+      }
+    }
+
+    if (layerVisibility.globalPlan) {
+      const globalPath = buildPathLine(
+        robot.state.global_path?.poses.map((pose) => ({ x: pose.position.x, y: pose.position.y })) ?? [],
+        color,
+        0.065,
+      );
+      if (globalPath) {
+        setObjectOpacity(globalPath, 0.5);
+        robotGroup.add(globalPath);
+      }
+    }
+
+    if (layerVisibility.localPlan) {
+      const localPath = buildPathLine(
+        robot.state.local_path?.poses.map((pose) => ({ x: pose.position.x, y: pose.position.y })) ?? [],
+        color,
+        0.085,
+      );
+      if (localPath) {
+        setObjectOpacity(localPath, 0.45);
+        robotGroup.add(localPath);
+      }
+    }
+
+    if (layerVisibility.scan) {
+      const scan = buildScanPoints(robot.state.scan, robot.state.tf, robot.state.tf_static, robotPose);
+      if (scan) {
+        setObjectOpacity(scan, 0.45);
+        robotGroup.add(scan);
+      }
+    }
+
+    if (robotGroup.children.length > 0) {
+      group.add(robotGroup);
+    }
+  });
+
+  return group.children.length > 0 ? group : null;
+}
+
 export function SceneViewport({
   target,
   state,
+  robotStates = [],
   viewMode,
   layerVisibility,
   onResetView,
@@ -1618,7 +1825,7 @@ export function SceneViewport({
   const controlsRef = useRef<OrbitControls | null>(null);
   const renderRef = useRef<(() => void) | null>(null);
   const robotRef = useRef<THREE.Group | null>(null);
-  const robotMarkerRef = useRef<THREE.Group | null>(null);
+  const robotMarkerRef = useRef<THREE.Object3D | null>(null);
   const gridRef = useRef<THREE.GridHelper | null>(null);
   const mapMeshRef = useRef<THREE.Mesh | null>(null);
   const globalCostmapMeshRef = useRef<THREE.Mesh | null>(null);
@@ -1638,6 +1845,7 @@ export function SceneViewport({
   const localPathRef = useRef<THREE.Group | null>(null);
   const scanRef = useRef<THREE.Points | null>(null);
   const tfGroupRef = useRef<THREE.Group | null>(null);
+  const fleetGroupRef = useRef<THREE.Group | null>(null);
   const goalMarkerRef = useRef<THREE.Group | null>(null);
   // Cache buildFrameLookup result by (tf, tfStatic, robotDescription) identity
   const frameLookupCacheRef = useRef<{
@@ -1754,15 +1962,8 @@ export function SceneViewport({
     } else {
       fpvDragRef.current = null;
 
-      // Return from any camera mode: restore top-down overhead view
-      camera.fov = 14;
-      camera.zoom = 0.4;
-      // Restore the top-down up vector before controls takes over
-      camera.up.set(0, 0, -1);
-      camera.updateProjectionMatrix();
       const t = controls.target.clone();
-      camera.position.set(t.x, 28, t.z + 0.001);
-      controls.update();
+      applyDefaultSceneCamera(camera, controls, t.x, t.z);
 
       if (rendererRef.current) {
         rendererRef.current.domElement.style.cursor = "grab";
@@ -1802,14 +2003,14 @@ export function SceneViewport({
     viewportRef.current.appendChild(renderer.domElement);
 
     const camera = new THREE.PerspectiveCamera(
-      14,
+      DEFAULT_SCENE_CAMERA_FOV,
       viewportRef.current.clientWidth / Math.max(viewportRef.current.clientHeight, 1),
       0.1,
       200,
     );
-    camera.zoom = 0.4;
-    camera.up.set(0, 0, -1);
-    camera.position.set(0, 28, 0.001);
+    camera.zoom = DEFAULT_SCENE_CAMERA_ZOOM;
+    camera.up.set(0, 1, 0);
+    camera.position.set(0, DEFAULT_SCENE_CAMERA_HEIGHT, DEFAULT_SCENE_CAMERA_BACK_OFFSET);
     camera.lookAt(0, 0, 0);
     camera.updateProjectionMatrix();
 
@@ -1823,6 +2024,7 @@ export function SceneViewport({
     controls.minDistance = 2;
     controls.maxDistance = 80;
     controls.target.set(0, 0, 0);
+    applyDefaultSceneCamera(camera, controls, 0, 0);
     controls.addEventListener("change", () => {
       renderer.render(scene, camera);
     });
@@ -2089,6 +2291,7 @@ export function SceneViewport({
       disposeObject(blockedLinkRef.current);
       disposeObject(scanRef.current);
       disposeObject(tfGroupRef.current);
+      disposeObject(fleetGroupRef.current);
       disposeObject(goalMarkerRef.current);
       disposeObject(routeMarkersGroupRef.current);
       disposeObject(previewMarkerRef.current);
@@ -2131,7 +2334,7 @@ export function SceneViewport({
       state.tf_static,
       state.robot_pose,
       state.robot_description?.data,
-    );
+    ) ?? undefined;
     // Keep ref in sync so camera-mode effects can read the pose immediately
     latestRobotPoseRef.current = robotPose ?? undefined;
 
@@ -2139,7 +2342,8 @@ export function SceneViewport({
       gridRef.current.visible = layerVisibility.grid;
     }
 
-    robot.visible = layerVisibility.robot;
+    const activeRobotId = robotStates.find((robotState) => robotState.active)?.robotId ?? target.id;
+    robot.visible = layerVisibility.robot && Boolean(robotPose);
     const shouldRebuildRobot =
       previousRobotInputsRef.current.robotDescription !== state.robot_description
       || previousRobotInputsRef.current.tfStatic !== state.tf_static;
@@ -2160,15 +2364,38 @@ export function SceneViewport({
         tfStatic: state.tf_static,
       };
     }
-    robot.position.set(robotPose?.position.x ?? 0, 0, -(robotPose?.position.y ?? 0));
-    robot.rotation.set(0, robotPose?.orientation.yaw ?? 0, 0);
-
-    if (robotMarkerRef.current) {
-      scene.remove(robotMarkerRef.current);
-      disposeObject(robotMarkerRef.current);
-      robotMarkerRef.current = null;
+    if (robotPose) {
+      robot.position.set(robotPose.position.x, 0, -robotPose.position.y);
+      robot.rotation.set(0, robotPose.orientation.yaw, 0);
     }
 
+    if (!robotPose || !layerVisibility.robot) {
+      if (robotMarkerRef.current) {
+        scene.remove(robotMarkerRef.current);
+        disposeObject(robotMarkerRef.current);
+        robotMarkerRef.current = null;
+      }
+    } else {
+      const activeRobotState = robotStates.find((robotState) => robotState.robotId === activeRobotId);
+      const activeMarkerColor = activeRobotState?.color ?? "#e49b12";
+      if (
+        !robotMarkerRef.current ||
+        robotMarkerRef.current.userData.robotId !== activeRobotId ||
+        robotMarkerRef.current.userData.markerColor !== activeMarkerColor
+      ) {
+        if (robotMarkerRef.current) {
+          scene.remove(robotMarkerRef.current);
+          disposeObject(robotMarkerRef.current);
+        }
+        robotMarkerRef.current = buildRobotArrowMarker(activeMarkerColor, true);
+        robotMarkerRef.current.userData.robotId = activeRobotId;
+        robotMarkerRef.current.userData.markerColor = activeMarkerColor;
+        scene.add(robotMarkerRef.current);
+      }
+      robotMarkerRef.current.position.x = robotPose.position.x;
+      robotMarkerRef.current.position.z = -robotPose.position.y;
+      robotMarkerRef.current.visible = layerVisibility.robot;
+    }
     const shouldRebuildPaths =
       previousPathInputsRef.current.globalPath !== state.global_path
       || previousPathInputsRef.current.localPath !== state.local_path;
@@ -2448,6 +2675,18 @@ export function SceneViewport({
       tfGroupRef.current.visible = layerVisibility.tf;
     }
 
+    if (fleetGroupRef.current) {
+      scene.remove(fleetGroupRef.current);
+      disposeObject(fleetGroupRef.current);
+      fleetGroupRef.current = null;
+    }
+    if (robotStates.length > 1) {
+      fleetGroupRef.current = buildFleetOverlay(robotStates, layerVisibility);
+      if (fleetGroupRef.current) {
+        scene.add(fleetGroupRef.current);
+      }
+    }
+
     const activeMap = state.map ?? state.local_costmap ?? state.global_costmap;
     if (activeMap) {
       const mapSignature = [
@@ -2470,14 +2709,7 @@ export function SceneViewport({
         const centerX = activeMap.info.origin.position.x + center.x;
         const centerY = activeMap.info.origin.position.y + center.y;
 
-        camera.position.x = centerX;
-        camera.position.z = -(centerY + 0.001);
-        if (controls) {
-          controls.target.set(centerX, 0, -centerY);
-          controls.update();
-        } else {
-          camera.lookAt(centerX, 0, -centerY);
-        }
+        applyDefaultSceneCamera(camera, controls ?? null, centerX, -centerY);
         lastCenteredMapSignatureRef.current = mapSignature;
       }
     }
@@ -2511,7 +2743,7 @@ export function SceneViewport({
     }
 
     renderRef.current?.();
-  }, [goalMarker, layerVisibility, routeWaypoints, state, viewMode]);
+  }, [goalMarker, layerVisibility, robotStates, routeWaypoints, state, viewMode]);
 
   useEffect(() => {
     const camera = cameraRef.current;
@@ -2531,20 +2763,7 @@ export function SceneViewport({
     const centerX = activeMap.info.origin.position.x + center.x;
     const centerY = activeMap.info.origin.position.y + center.y;
 
-    camera.position.x = centerX;
-    camera.position.y = 28;
-    camera.position.z = -(centerY + 0.001);
-    camera.zoom = 0.4;
-    camera.fov = 14;
-    // Ensure up vector is correct for top-down view (FPV may have changed it)
-    camera.up.set(0, 0, -1);
-    camera.updateProjectionMatrix();
-    if (controls) {
-      controls.target.set(centerX, 0, -centerY);
-      controls.update();
-    } else {
-      camera.lookAt(centerX, 0, -centerY);
-    }
+    applyDefaultSceneCamera(camera, controls ?? null, centerX, -centerY);
     lastCenteredMapSignatureRef.current = [
       activeMap.info.width,
       activeMap.info.height,
