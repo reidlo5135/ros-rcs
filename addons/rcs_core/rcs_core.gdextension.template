@@ -1,0 +1,14 @@
+[configuration]
+
+entry_symbol = "rcs_core_library_init"
+compatibility_minimum = "4.6"
+reloadable = true
+
+[libraries]
+
+windows.debug.x86_64 = "res://addons/rcs_core/bin/rcs_core.windows.template_debug.x86_64.dll"
+windows.release.x86_64 = "res://addons/rcs_core/bin/rcs_core.windows.template_release.x86_64.dll"
+linux.debug.x86_64 = "res://addons/rcs_core/bin/librcs_core.linux.template_debug.x86_64.so"
+linux.release.x86_64 = "res://addons/rcs_core/bin/librcs_core.linux.template_release.x86_64.so"
+macos.debug = "res://addons/rcs_core/bin/librcs_core.macos.template_debug.framework"
+macos.release = "res://addons/rcs_core/bin/librcs_core.macos.template_release.framework"

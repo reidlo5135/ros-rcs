@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rcs.local/schemas/rcs-command.schema.json",
+  "title": "RCS Command",
+  "type": "object",
+  "required": ["request_id", "schema_version", "kind", "target_robot_id", "payload"],
+  "properties": {
+    "request_id": { "type": "string", "minLength": 1 },
+    "schema_version": { "type": "integer", "minimum": 1 },
+    "kind": {
+      "type": "string",
+      "enum": ["navigate_to_pose", "cancel_navigate", "set_initial_pose", "motion_command", "reset_world"]
+    },
+    "target_robot_id": { "type": "string", "minLength": 1 },
+    "payload": { "type": "object" },
+    "source": { "type": "string" }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rcs.local/schemas/rcs-telemetry.schema.json",
+  "title": "RCS Telemetry Envelope",
+  "type": "object",
+  "required": ["schema_version", "kind", "robot_id", "payload"],
+  "properties": {
+    "schema_version": { "type": "integer", "minimum": 1 },
+    "kind": {
+      "type": "string",
+      "enum": ["map", "costmap", "robot_pose", "path", "scan", "tf", "robot_description", "motion_status", "battery_state"]
+    },
+    "robot_id": { "type": "string", "minLength": 1 },
+    "frame_id": { "type": "string" },
+    "payload": { "type": "object" }
+  },
+  "additionalProperties": true
+}

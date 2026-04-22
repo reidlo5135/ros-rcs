@@ -1,4 +1,32 @@
-node_modules/
-dist/
+/.godot/
+/.import/
+/.mono/
+/exports/
+/logs/
+/tmp/
+
+# Godot imported/generated assets
+*.import
+*.translation
+
+# Native extension build outputs
+/addons/rcs_core/bin/*
+!/addons/rcs_core/bin/.gitkeep
+/native/**/bin/
+/native/**/obj/
+/native/**/.sconsign.dblite
+/native/**/compile_commands.json
+*.dll
+*.dylib
+*.so
+*.pdb
+*.lib
+*.exp
+*.obj
+*.o
+
+# Local tool state
+.vscode/
+.idea/
 *.log
 .DS_Store

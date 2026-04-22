@@ -1,0 +1,26 @@
+{
+  "version": "0.2.0",
+  "transport": {
+    "broker_url": "ws://192.168.61.35:9001/mqtt",
+    "secure_required": false,
+    "client_id_prefix": "rcs-godot-operator"
+  },
+  "session": {
+    "default_robot_id": "burger1",
+    "target_kind": "robot"
+  },
+  "visualization": {
+    "enabled_layers": [
+      "grid",
+      "map",
+      "global_costmap",
+      "local_costmap",
+      "footprint",
+      "robot",
+      "global_path",
+      "local_path",
+      "scan",
+      "tf"
+    ]
+  }
+}
