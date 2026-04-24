@@ -221,8 +221,8 @@ input:not([type="checkbox"])::placeholder {
   color: #7eb4ff;
 }
 
-/* Mapping – amber */
-.rcs-tab--active-mapping {
+/* MCP – amber */
+.rcs-tab--active-mcp {
   box-shadow: inset 0 0 0 1.5px var(--accent-strong);
   background: rgba(140, 80, 10, 0.33);
   color: var(--accent);
@@ -342,8 +342,10 @@ input:not([type="checkbox"])::placeholder {
   overflow: hidden;
 }
 
+
 .rcs-sidebar,
-.rcs-center-column {
+.rcs-center-column,
+.rcs-mcp-column {
   height: 100%;
   min-height: 0;
 }
@@ -667,6 +669,481 @@ input:not([type="checkbox"])::placeholder {
   display: grid;
   min-height: 0;
   overflow: hidden;
+}
+
+.rcs-center-column--mcp,
+.rcs-mcp-column {
+  min-width: 0;
+}
+
+.rcs-mcp-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  isolation: isolate;
+  border: 1px solid var(--line-strong);
+  background-color: var(--panel);
+  background-image:
+    repeating-linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.016) 0,
+      rgba(255, 255, 255, 0.016) 1px,
+      transparent 0,
+      transparent 50%
+    ),
+    repeating-linear-gradient(
+      45deg,
+      rgba(255, 255, 255, 0.013) 0,
+      rgba(255, 255, 255, 0.013) 1px,
+      transparent 0,
+      transparent 50%
+    );
+  background-size: 4px 4px, 4px 4px;
+}
+
+.rcs-mcp-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at top left, rgba(37, 170, 184, 0.08), transparent 32%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 28%);
+  transition: background 160ms ease;
+}
+
+.rcs-mcp-panel > * {
+  position: relative;
+  z-index: 1;
+}
+
+.rcs-mcp-panel__header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.rcs-mcp-panel__title-area {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.rcs-mcp-panel__eyebrow {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--teal-bright);
+}
+
+.rcs-mcp-panel__provider-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px;
+  width: 122px;
+}
+
+.rcs-mcp-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 22px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-family: "Noto Sans KR", "Segoe UI", sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-transform: none;
+  white-space: nowrap;
+  transition: background 130ms, border-color 130ms, color 130ms;
+}
+
+.rcs-mcp-tab--active {
+  background: rgba(37, 170, 184, 0.14);
+  border-color: rgba(37, 170, 184, 0.45);
+  color: var(--teal-bright);
+}
+
+.rcs-mcp-tab:hover:not(.rcs-mcp-tab--active) {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+}
+
+.rcs-mcp-panel__header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.rcs-mcp-status {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 9px;
+  border: 1px solid rgba(37, 170, 184, 0.35);
+  border-radius: 999px;
+  color: #8ceaf5;
+  background: rgba(24, 47, 50, 0.8);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.rcs-mcp-config-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 2px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted);
+  transition: color 120ms, background 120ms, border-color 120ms;
+}
+
+.rcs-mcp-config-toggle svg {
+  width: 15px;
+  height: 15px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.rcs-mcp-config-toggle:hover,
+.rcs-mcp-config-toggle.is-open {
+  color: var(--accent);
+  background: rgba(230, 163, 53, 0.1);
+  border-color: rgba(230, 163, 53, 0.3);
+}
+
+.rcs-mcp-panel__config {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.rcs-mcp-chatlog {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rcs-mcp-starters {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 12px;
+}
+
+.rcs-mcp-starters__label {
+  margin: 0 0 2px;
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.rcs-mcp-prompt {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  padding: 9px 12px;
+  font-size: 12px;
+  text-align: left;
+  border-radius: 4px;
+  transition: border-color 120ms, background 120ms;
+}
+
+.rcs-mcp-prompt:hover {
+  border-color: rgba(37, 170, 184, 0.38);
+  background: rgba(24, 47, 50, 0.6);
+}
+
+/* ── Message base ── */
+
+.rcs-mcp-message {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+/* ── Avatars ── */
+
+.rcs-mcp-avatar {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  user-select: none;
+}
+
+.rcs-mcp-avatar--operator { background: #6b4fbb; color: #fff; }
+.rcs-mcp-avatar--claude   { background: #c96442; color: #fff; }
+.rcs-mcp-avatar--chatgpt  { background: #2f2f2f; color: #f5f5f5; }
+
+/* ── Bubble ── */
+
+.rcs-mcp-bubble {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rcs-mcp-bubble p {
+  margin: 0;
+  max-width: min(100%, 620px);
+  white-space: pre-wrap;
+  line-height: 1.65;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.rcs-mcp-message__time {
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+
+.rcs-mcp-message--user .rcs-mcp-bubble p {
+  display: inline-block;
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px 18px 18px 18px;
+}
+
+/* ── Claude theme ── */
+
+.rcs-mcp-panel--claude::before {
+  background:
+    radial-gradient(circle at top left, rgba(217, 119, 87, 0.14), transparent 34%),
+    linear-gradient(180deg, rgba(125, 67, 46, 0.1), transparent 30%);
+}
+
+.rcs-mcp-panel--claude .rcs-mcp-panel__eyebrow {
+  color: #d97757;
+}
+
+.rcs-mcp-panel--claude .rcs-mcp-tab {
+  color: #8f7f76;
+}
+
+.rcs-mcp-panel--claude .rcs-mcp-tab--active {
+  background: rgba(201, 100, 66, 0.15);
+  border-color: rgba(201, 100, 66, 0.5);
+  color: #e8845c;
+}
+
+.rcs-mcp-panel--claude .rcs-mcp-status {
+  border-color: rgba(201, 100, 66, 0.4);
+  color: #e8845c;
+  background: rgba(60, 18, 5, 0.7);
+}
+
+.rcs-mcp-panel--claude .rcs-mcp-prompt:hover {
+  border-color: rgba(217, 119, 87, 0.4);
+  background: rgba(61, 25, 13, 0.5);
+}
+
+.rcs-mcp-panel--claude .rcs-mcp-composer__input {
+  border-color: rgba(217, 119, 87, 0.16);
+  background: rgba(25, 15, 11, 0.5);
+  color: #f3e9e4;
+}
+
+.rcs-mcp-panel--claude .rcs-mcp-composer__input::placeholder,
+.rcs-mcp-panel--claude .rcs-mcp-message__time,
+.rcs-mcp-panel--claude .rcs-mcp-composer__hint {
+  color: #9a8278;
+}
+
+.rcs-mcp-panel--claude .rcs-mcp-prompt,
+.rcs-mcp-panel--claude .rcs-mcp-bubble p,
+.rcs-mcp-panel--claude .rcs-mcp-composer__input,
+.rcs-mcp-panel--claude .rcs-button--claude {
+  font-family: "DM Sans", "Segoe UI", sans-serif;
+}
+
+.rcs-mcp-panel--claude .rcs-mcp-bubble p {
+  font-size: 14px;
+  line-height: 1.75;
+  letter-spacing: 0.008em;
+  font-weight: 400;
+  color: #f3e9e4;
+}
+
+.rcs-mcp-panel--claude .rcs-mcp-message--user .rcs-mcp-bubble p {
+  background: rgba(247, 240, 234, 0.06);
+  border-color: rgba(232, 132, 92, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+/* ── ChatGPT theme ── */
+
+.rcs-mcp-panel--chatgpt::before {
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.08), transparent 34%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 30%);
+}
+
+.rcs-mcp-panel--chatgpt .rcs-mcp-panel__eyebrow {
+  color: #d9d9d9;
+}
+
+.rcs-mcp-panel--chatgpt .rcs-mcp-tab {
+  color: #8f8f8f;
+}
+
+.rcs-mcp-panel--chatgpt .rcs-mcp-tab--active {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.26);
+  color: #f2f2f2;
+}
+
+.rcs-mcp-panel--chatgpt .rcs-mcp-status {
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #f0f0f0;
+  background: rgba(24, 24, 24, 0.82);
+}
+
+.rcs-mcp-panel--chatgpt .rcs-mcp-prompt:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.rcs-mcp-panel--chatgpt .rcs-mcp-composer__input {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(18, 18, 18, 0.78);
+  color: #ececec;
+}
+
+.rcs-mcp-panel--chatgpt .rcs-mcp-composer__input::placeholder,
+.rcs-mcp-panel--chatgpt .rcs-mcp-message__time,
+.rcs-mcp-panel--chatgpt .rcs-mcp-composer__hint {
+  color: #8f8f8f;
+}
+
+.rcs-mcp-panel--chatgpt .rcs-mcp-prompt,
+.rcs-mcp-panel--chatgpt .rcs-mcp-bubble p,
+.rcs-mcp-panel--chatgpt .rcs-mcp-composer__input,
+.rcs-mcp-panel--chatgpt .rcs-button--chatgpt {
+  font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
+}
+
+.rcs-mcp-panel--chatgpt .rcs-mcp-bubble p {
+  font-size: 13px;
+  line-height: 1.6;
+  letter-spacing: -0.006em;
+  font-weight: 400;
+  color: #ececec;
+}
+
+.rcs-mcp-panel--chatgpt .rcs-mcp-message--user .rcs-mcp-bubble p {
+  background: #2b2d31;
+  border-color: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+}
+
+/* ── Provider send buttons ── */
+
+.rcs-button--claude {
+  background: rgba(80, 25, 5, 0.5);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, transparent 100%);
+  color: #e8845c;
+  border: 1px solid rgba(201, 100, 66, 0.5);
+}
+.rcs-button--claude:hover { background: rgba(110, 38, 10, 0.65); }
+
+.rcs-button--chatgpt {
+  background: rgba(255, 255, 255, 0.08);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, transparent 100%);
+  color: #f2f2f2;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+.rcs-button--chatgpt:hover { background: rgba(255, 255, 255, 0.14); }
+
+.rcs-mcp-composer {
+  flex: 0 0 auto;
+  display: grid;
+  gap: 8px;
+  padding: 10px 14px 12px;
+  border-top: 1px solid var(--line);
+}
+
+.rcs-mcp-composer__input {
+  width: 100%;
+  min-height: 72px;
+  max-height: 180px;
+  resize: vertical;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--text);
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.rcs-mcp-composer__input::placeholder {
+  color: var(--muted);
+}
+
+.rcs-mcp-composer__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.rcs-mcp-composer__hint {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+@media (max-width: 1280px) {
+  .rcs-mcp-panel__config {
+    grid-template-columns: 1fr;
+  }
+
+  .rcs-mcp-composer__actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
 }
 
 .rcs-scene-panel {

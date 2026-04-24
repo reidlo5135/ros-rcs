@@ -38,6 +38,7 @@ import { Topbar } from "../components/layout/Topbar";
 import { EventsPanel } from "../components/panels/EventsPanel";
 import { CommandPanel } from "../components/panels/CommandPanel";
 import { JoystickPanel } from "../components/panels/JoystickPanel";
+import { MCPChatPanel } from "../components/panels/MCPChatPanel";
 import { VisualizationPanel } from "../components/panels/VisualizationPanel";
 import { MqttPanel } from "../components/panels/MqttPanel";
 import { NavigationStatusPanel } from "../components/panels/NavigationStatusPanel";
@@ -834,7 +835,7 @@ function JoystickPad({ linearX, angularZ, onCommandChange, onCommandStop }: Joys
 }
 
 export function VizDashboardPage({ productName }: DashboardShellProps) {
-  const [viewMode, setViewMode] = useState<"nav" | "mapping">("nav");
+  const [viewMode, setViewMode] = useState<"nav" | "mcp">("nav");
   const [mqttUrl, setMqttUrl] = useState("ws://192.168.61.35:9001/mqtt");
   const [robotId, setRobotId] = useState("burger1");
   const [connectionLabel, setConnectionLabel] = useState("Disconnected");
@@ -886,7 +887,7 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
   const autoClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activePingRequestIdRef = useRef<string | null>(null);
   const lastPingSentAtRef = useRef<number | null>(null);
-  const modeLabel: ViewMode = viewMode === "nav" ? "navigation" : "mapping";
+  const sceneModeLabel: ViewMode = "navigation";
   const activeTarget = useMemo(() => ({ ...target, id: robotId.trim() || target.id }), [robotId]);
   const robotPose = bridgeState.robot_pose ?? DEFAULT_ROBOT_POSE;
   const motionStatus = bridgeState.motion_status ?? INITIAL_MOTION_STATUS;
@@ -1527,115 +1528,151 @@ export function VizDashboardPage({ productName }: DashboardShellProps) {
         batteryLabel={batteryPercentage !== null ? `${Math.round(batteryPercentage)}%` : DEFAULT_BATTERY_LABEL}
       />
 
-      <section className="rcs-workspace">
-        <aside className="rcs-sidebar rcs-sidebar--left">
-          <MqttPanel
-            mqttUrl={mqttUrl}
-            robotId={robotId}
-            onMqttUrlChange={setMqttUrl}
-            onRobotIdChange={setRobotId}
-            onConnect={connectMqtt}
-            onDisconnect={() => disconnectMqtt()}
-          />
+      <section
+        className="rcs-workspace"
+        style={viewMode === "mcp" ? { gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)" } : undefined}
+      >
+        {viewMode === "mcp" ? (
+          <>
+            <div className="rcs-mcp-column">
+              <MCPChatPanel
+                mqttUrl={mqttUrl}
+                robotId={robotId}
+                onMqttUrlChange={setMqttUrl}
+                onRobotIdChange={setRobotId}
+                onConnect={connectMqtt}
+                onDisconnect={() => disconnectMqtt()}
+              />
+            </div>
 
-          <CommandPanel
-            poseInteractionMode={poseInteractionMode}
-            routeWaypoints={routeWaypoints}
-            activeGoalIndex={activeGoalIndex}
-            onAddWaypoint={() => {
-              setPoseInteractionMode((current) => {
-                if (current === "goal") {
-                  return "idle";
-                }
-                pushEvent("Route mode: drag on the map to place waypoints");
-                return "goal";
-              });
-            }}
-            onRemoveWaypoint={(index) => {
-              setRouteWaypoints((current) => current.filter((_, i) => i !== index));
-            }}
-            onClearWaypoints={() => {
-              if (autoClearTimerRef.current != null) { clearTimeout(autoClearTimerRef.current); autoClearTimerRef.current = null; }
-              routeActiveRef.current = false;
-              setActiveGoalIndex(-1);
-              setRouteWaypoints([]);
-              pushEvent("Route waypoints cleared");
-            }}
-            onSendRoute={handleSendRoute}
-            onCancelRoute={() => {
-              if (autoClearTimerRef.current != null) { clearTimeout(autoClearTimerRef.current); autoClearTimerRef.current = null; }
-              routeActiveRef.current = false;
-              setActiveGoalIndex(-1);
-              setPoseInteractionMode("idle");
-              publishCommand(commandTopics.navigationCancel, {
-                request_id: createCommandId(),
-              }, "Navigation Cancel");
-            }}
-            onSetInitialPose={() => {
-              setPoseInteractionMode((current) => {
-                const nextMode = current === "initial_pose" ? "idle" : "initial_pose";
-                if (nextMode === "initial_pose") {
-                  setSceneGoalMarker(null);
-                  pushEvent("Set Initial Pose armed: drag on the map to place the pose");
-                }
-                return nextMode;
-              });
-            }}
-            onOpenSettings={() => setCommandSettingsOpen(true)}
-          />
+            <div className="rcs-center-column rcs-center-column--mcp">
+              <SceneViewport
+                target={activeTarget}
+                state={bridgeState}
+                viewMode={sceneModeLabel}
+                onResetView={() => setSceneResetToken((current) => current + 1)}
+                resetViewToken={sceneResetToken}
+                goalMarker={sceneGoalMarker}
+                interactionMode={poseInteractionMode}
+                onPoseSelection={handlePoseSelection}
+                onPosePlacement={handlePosePlacement}
+                routeWaypoints={routeWaypoints}
+                layerVisibility={layerVisibility}
+              />
+            </div>
+          </>
+        ) : (
+          <>
+            <aside className="rcs-sidebar rcs-sidebar--left">
+              <MqttPanel
+                mqttUrl={mqttUrl}
+                robotId={robotId}
+                onMqttUrlChange={setMqttUrl}
+                onRobotIdChange={setRobotId}
+                onConnect={connectMqtt}
+                onDisconnect={() => disconnectMqtt()}
+              />
 
-          <VisualizationPanel
-            layerVisibility={layerVisibility}
-            onLayerVisibilityChange={(key, checked) => {
-              setLayerVisibility((current) => ({
-                ...current,
-                [key]: checked,
-              }));
-            }}
-            onOpenSettings={() => setVisualizationSettingsOpen(true)}
-          />
-        </aside>
+              <CommandPanel
+                poseInteractionMode={poseInteractionMode}
+                routeWaypoints={routeWaypoints}
+                activeGoalIndex={activeGoalIndex}
+                onAddWaypoint={() => {
+                  setPoseInteractionMode((current) => {
+                    if (current === "goal") {
+                      return "idle";
+                    }
+                    pushEvent("Route mode: drag on the map to place waypoints");
+                    return "goal";
+                  });
+                }}
+                onRemoveWaypoint={(index) => {
+                  setRouteWaypoints((current) => current.filter((_, i) => i !== index));
+                }}
+                onClearWaypoints={() => {
+                  if (autoClearTimerRef.current != null) { clearTimeout(autoClearTimerRef.current); autoClearTimerRef.current = null; }
+                  routeActiveRef.current = false;
+                  setActiveGoalIndex(-1);
+                  setRouteWaypoints([]);
+                  pushEvent("Route waypoints cleared");
+                }}
+                onSendRoute={handleSendRoute}
+                onCancelRoute={() => {
+                  if (autoClearTimerRef.current != null) { clearTimeout(autoClearTimerRef.current); autoClearTimerRef.current = null; }
+                  routeActiveRef.current = false;
+                  setActiveGoalIndex(-1);
+                  setPoseInteractionMode("idle");
+                  publishCommand(commandTopics.navigationCancel, {
+                    request_id: createCommandId(),
+                  }, "Navigation Cancel");
+                }}
+                onSetInitialPose={() => {
+                  setPoseInteractionMode((current) => {
+                    const nextMode = current === "initial_pose" ? "idle" : "initial_pose";
+                    if (nextMode === "initial_pose") {
+                      setSceneGoalMarker(null);
+                      pushEvent("Set Initial Pose armed: drag on the map to place the pose");
+                    }
+                    return nextMode;
+                  });
+                }}
+                onOpenSettings={() => setCommandSettingsOpen(true)}
+              />
 
-        <div className="rcs-center-column">
-          <SceneViewport
-            target={activeTarget}
-            state={bridgeState}
-            viewMode={modeLabel}
-            onResetView={() => setSceneResetToken((current) => current + 1)}
-            resetViewToken={sceneResetToken}
-            goalMarker={sceneGoalMarker}
-            interactionMode={poseInteractionMode}
-            onPoseSelection={handlePoseSelection}
-            onPosePlacement={handlePosePlacement}
-            routeWaypoints={routeWaypoints}
-            layerVisibility={layerVisibility}
-          />
-        </div>
+              <VisualizationPanel
+                layerVisibility={layerVisibility}
+                onLayerVisibilityChange={(key, checked) => {
+                  setLayerVisibility((current) => ({
+                    ...current,
+                    [key]: checked,
+                  }));
+                }}
+                onOpenSettings={() => setVisualizationSettingsOpen(true)}
+              />
+            </aside>
 
-        <aside className="rcs-sidebar rcs-sidebar--right">
-          <NavigationStatusPanel
-            motion={motionStatus.motion}
-            remainingLabel={formatDistance(motionStatus.remaining_distance ?? null)}
-            headingLabel={formatHeading(motionStatus.heading)}
-            goalLabel={motionStatus.goal_state ?? "Idle"}
-            blockedSourceLabel={motionStatus.blocked_source ?? "Clear"}
-          />
+            <div className="rcs-center-column">
+              <SceneViewport
+                target={activeTarget}
+                state={bridgeState}
+                viewMode={sceneModeLabel}
+                onResetView={() => setSceneResetToken((current) => current + 1)}
+                resetViewToken={sceneResetToken}
+                goalMarker={sceneGoalMarker}
+                interactionMode={poseInteractionMode}
+                onPoseSelection={handlePoseSelection}
+                onPosePlacement={handlePosePlacement}
+                routeWaypoints={routeWaypoints}
+                layerVisibility={layerVisibility}
+              />
+            </div>
 
-          <EventsPanel events={events} />
+            <aside className="rcs-sidebar rcs-sidebar--right">
+              <NavigationStatusPanel
+                motion={motionStatus.motion}
+                remainingLabel={formatDistance(motionStatus.remaining_distance ?? null)}
+                headingLabel={formatHeading(motionStatus.heading)}
+                goalLabel={motionStatus.goal_state ?? "Idle"}
+                blockedSourceLabel={motionStatus.blocked_source ?? "Clear"}
+              />
 
-          <JoystickPanel
-            linearX={teleopLinearX}
-            angularZ={teleopAngularZ}
-            onCommandChange={(linearX, angularZ) => {
-              setTeleopLinearX(linearX);
-              setTeleopAngularZ(angularZ);
-            }}
-            onCommandStop={() => {
-              setTeleopLinearX(0);
-              setTeleopAngularZ(0);
-            }}
-          />
-        </aside>
+              <EventsPanel events={events} />
+
+              <JoystickPanel
+                linearX={teleopLinearX}
+                angularZ={teleopAngularZ}
+                onCommandChange={(linearX, angularZ) => {
+                  setTeleopLinearX(linearX);
+                  setTeleopAngularZ(angularZ);
+                }}
+                onCommandStop={() => {
+                  setTeleopLinearX(0);
+                  setTeleopAngularZ(0);
+                }}
+              />
+            </aside>
+          </>
+        )}
       </section>
 
       <TopicSettingsModal

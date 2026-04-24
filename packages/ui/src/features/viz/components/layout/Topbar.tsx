@@ -2,8 +2,8 @@ type TopbarProps = {
   productName: string;
   connectionLabel: string;
   poseLabel: string;
-  viewMode: "nav" | "mapping";
-  onViewModeChange: (mode: "nav" | "mapping") => void;
+  viewMode: "nav" | "mcp";
+  onViewModeChange: (mode: "nav" | "mcp") => void;
   signalBars: number;
   signalLabel: string;
   batteryPercentage: number | null;
@@ -40,11 +40,11 @@ export function Topbar({
             Navigation
           </button>
           <button
-            className={`rcs-tab${viewMode === "mapping" ? " rcs-tab--active-mapping" : ""}`}
+            className={`rcs-tab${viewMode === "mcp" ? " rcs-tab--active-mcp" : ""}`}
             type="button"
-            onClick={() => onViewModeChange("mapping")}
+            onClick={() => onViewModeChange("mcp")}
           >
-            Mapping
+            MCP
           </button>
         </div>
         <div className="rcs-signal" aria-label="MQTT signal status">
