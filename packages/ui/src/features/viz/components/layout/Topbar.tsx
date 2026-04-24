@@ -37,14 +37,14 @@ export function Topbar({
             type="button"
             onClick={() => onViewModeChange("nav")}
           >
-            Navigation
+            Manual
           </button>
           <button
             className={`rcs-tab${viewMode === "mcp" ? " rcs-tab--active-mcp" : ""}`}
             type="button"
             onClick={() => onViewModeChange("mcp")}
           >
-            MCP
+            AI
           </button>
         </div>
         <div className="rcs-signal" aria-label="MQTT signal status">

@@ -1,40 +1,74 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
-export type MCPProvider = "claude" | "chatgpt";
+export type MCPProvider = "claude" | "chatgpt" | "ollama";
+
+type ChatMessageRole = "user" | "assistant" | "event" | "system";
 
 type MCPChatMessage = {
   id: string;
-  role: "system" | "user" | "assistant";
+  role: ChatMessageRole;
   content: string;
   timestamp: string;
+  category?: string;
+};
+
+type WsStatus = "disconnected" | "connecting" | "connected" | "error";
+
+type ChatEventPayload = {
+  category: string;
+  message: string;
+};
+
+type MCPChatPanelProps = {
+  mqttUrl: string;
+  robotId: string;
+  onMqttUrlChange: (url: string) => void;
+  onRobotIdChange: (id: string) => void;
+  onConnect: () => void;
+  onDisconnect: () => void;
 };
 
 const providerLabels: Record<MCPProvider, string> = {
   claude: "Claude",
   chatgpt: "ChatGPT",
+  ollama: "Ollama",
+};
+
+const WS_STATUS_LABEL: Record<WsStatus, string> = {
+  disconnected: "Offline",
+  connecting: "Connecting...",
+  connected: "Connected",
+  error: "Error",
 };
 
 const starterPrompts = [
   "AMR 전체 함대 상태를 요약해줘.",
+  "burger1을 map 기준 x=1.25, y=0.40 위치로 보내줘.",
   "burger1을 충전 스테이션으로 보내는 절차를 설명해줘.",
-  "현재 경로 막힘 이벤트가 있으면 우회 제안을 해줘.",
-  "맵 상에서 작업 구역별 대기 중 로봇을 분류해줘.",
+  "현재 경로 막힘이 있으면 우회 제안을 해줘.",
+  "burger1 goal을 map 기준 x=2.00, y=-0.75, yaw=1.57로 보내줘.",
 ];
 
-function createMessage(role: MCPChatMessage["role"], content: string): MCPChatMessage {
+function createMessage(
+  role: MCPChatMessage["role"],
+  content: string,
+  category?: string,
+): MCPChatMessage {
   return {
     id: `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     role,
     content,
+    category,
     timestamp: new Date().toLocaleTimeString("ko-KR", { hour12: false }),
   };
 }
 
 const initialMessages: MCPChatMessage[] = [
-  createMessage("system", "MCP 세션 대기 중."),
   createMessage(
     "assistant",
-    "Claude 또는 ChatGPT를 선택한 뒤, 관제 프롬프트를 입력하면 MCP 요청 흐름을 시작할 수 있습니다.",
+    "RCS는 RMS /chat 채널을 통해 자연어 명령과 navigation lifecycle 이벤트를 같은 타임라인으로 표시합니다.",
+    "assistant",
   ),
 ];
 
@@ -50,20 +84,114 @@ function GearIcon() {
   );
 }
 
-function MessageAvatar({ role, provider }: { role: MCPChatMessage["role"]; provider: MCPProvider }) {
-  const cls = role === "assistant" ? `rcs-mcp-avatar--${provider}` : "rcs-mcp-avatar--operator";
-  const label = role === "assistant" ? (provider === "claude" ? "C" : "G") : "OP";
-  return <div className={`rcs-mcp-avatar ${cls}`}>{label}</div>;
+function CloseIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path d="M5 5l10 10M15 5L5 15" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
 }
 
-type MCPChatPanelProps = {
-  mqttUrl: string;
-  robotId: string;
-  onMqttUrlChange: (url: string) => void;
-  onRobotIdChange: (id: string) => void;
-  onConnect: () => void;
-  onDisconnect: () => void;
-};
+function toCategoryClass(category?: string) {
+  if (!category) {
+    return "";
+  }
+
+  return category
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function extractChatEvent(payload: unknown): ChatEventPayload | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const record = payload as Record<string, unknown>;
+  const params = record.params && typeof record.params === "object" ? (record.params as Record<string, unknown>) : null;
+  const sources = [record, params].filter((item): item is Record<string, unknown> => Boolean(item));
+
+  for (const source of sources) {
+    const eventType =
+      typeof source.type === "string"
+        ? source.type
+        : typeof source.event === "string"
+          ? source.event
+          : typeof source.method === "string"
+            ? source.method
+            : null;
+
+    const category = typeof source.category === "string" ? source.category : null;
+    const message = typeof source.message === "string" ? source.message.trim() : null;
+
+    if ((eventType === "chat.event" || category) && message) {
+      return {
+        category: category ?? "assistant",
+        message,
+      };
+    }
+  }
+
+  return null;
+}
+
+function eventRoleFromCategory(category: string): ChatMessageRole {
+  return category === "assistant" ? "assistant" : "event";
+}
+
+function eventAvatarClass(category: string) {
+  if (category === "error" || category.endsWith(".failed")) {
+    return "rcs-mcp-avatar--error";
+  }
+
+  if (category.endsWith(".completed")) {
+    return "rcs-mcp-avatar--success";
+  }
+
+  if (category.startsWith("navigation.")) {
+    return "rcs-mcp-avatar--lifecycle";
+  }
+
+  return "rcs-mcp-avatar--event";
+}
+
+function eventAvatarLabel(category: string) {
+  if (category === "error" || category.endsWith(".failed")) {
+    return "ERR";
+  }
+
+  if (category.endsWith(".completed")) {
+    return "OK";
+  }
+
+  if (category.startsWith("navigation.")) {
+    return "NAV";
+  }
+
+  return "EV";
+}
+
+function MessageAvatar({
+  role,
+  provider,
+  category,
+}: {
+  role: MCPChatMessage["role"];
+  provider: MCPProvider;
+  category?: string;
+}) {
+  if (role === "assistant") {
+    const label = provider === "claude" ? "C" : provider === "chatgpt" ? "G" : "O";
+    return <div className={`rcs-mcp-avatar rcs-mcp-avatar--${provider}`}>{label}</div>;
+  }
+
+  if (role === "event") {
+    return <div className={`rcs-mcp-avatar ${eventAvatarClass(category ?? "")}`}>{eventAvatarLabel(category ?? "")}</div>;
+  }
+
+  return <div className="rcs-mcp-avatar rcs-mcp-avatar--operator">OP</div>;
+}
 
 export function MCPChatPanel({
   mqttUrl,
@@ -73,46 +201,184 @@ export function MCPChatPanel({
   onConnect,
   onDisconnect,
 }: MCPChatPanelProps) {
-  const [provider, setProvider] = useState<MCPProvider>("claude");
-  const [endpoint, setEndpoint] = useState("ws://127.0.0.1:3001/mcp");
-  const [sessionLabel, setSessionLabel] = useState("Follow Robot");
+  const [provider, setProvider] = useState<MCPProvider>("chatgpt");
+  const [endpoint, setEndpoint] = useState("ws://127.0.0.1:3001/chat");
   const [draft, setDraft] = useState("");
   const [messages, setMessages] = useState<MCPChatMessage[]>(initialMessages);
   const [configOpen, setConfigOpen] = useState(false);
-  const chatlogRef = useRef<HTMLDivElement>(null);
+  const [wsStatus, setWsStatus] = useState<WsStatus>("disconnected");
+  const [isWaiting, setIsWaiting] = useState(false);
 
-  const hasUserMessage = messages.some((m) => m.role === "user");
+  const chatlogRef = useRef<HTMLDivElement>(null);
+  const configModalRef = useRef<HTMLDivElement>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+
+  const hasUserMessage = messages.some((message) => message.role === "user");
 
   useEffect(() => {
     const el = chatlogRef.current;
     if (el) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, isWaiting]);
+
+  useEffect(() => {
+    if (configOpen) {
+      configModalRef.current?.focus();
+    }
+  }, [configOpen]);
+
+  useEffect(() => {
+    if (!configOpen) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setConfigOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [configOpen]);
+
+  useEffect(() => {
+    return () => {
+      wsRef.current?.close();
+    };
+  }, []);
+
+  const pushMessage = (
+    role: MCPChatMessage["role"],
+    content: string,
+    category?: string,
+  ) => {
+    setMessages((prev) => [...prev, createMessage(role, content, category)]);
+  };
+
+  const handleIncomingPayload = (raw: string) => {
+    let parsed: unknown;
+
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      const text = raw.trim();
+      if (text) {
+        pushMessage("system", text);
+      }
+      return;
+    }
+
+    const chatEvent = extractChatEvent(parsed);
+    if (chatEvent) {
+      pushMessage(eventRoleFromCategory(chatEvent.category), chatEvent.message, chatEvent.category);
+      setIsWaiting(false);
+      return;
+    }
+
+    const record = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+    const fallback =
+      (typeof record?.message === "string" && record.message.trim()) ||
+      (typeof record?.detail === "string" && record.detail.trim()) ||
+      "";
+
+    if (fallback) {
+      setIsWaiting(false);
+      pushMessage("system", fallback);
+    }
+  };
+
+  const connectChat = () => {
+    wsRef.current?.close();
+    wsRef.current = null;
+    setWsStatus("connecting");
+    pushMessage("system", `RMS /chat 연결 시도: ${endpoint}`);
+
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(endpoint);
+    } catch {
+      setWsStatus("error");
+      pushMessage("system", `연결 실패: 유효하지 않은 엔드포인트 "${endpoint}"`);
+      return;
+    }
+
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      setWsStatus("connected");
+      pushMessage("system", `RMS /chat 연결 완료: ${endpoint}`);
+    };
+
+    ws.onmessage = async (event) => {
+      if (typeof event.data === "string") {
+        handleIncomingPayload(event.data);
+        return;
+      }
+
+      if (event.data instanceof Blob) {
+        handleIncomingPayload(await event.data.text());
+        return;
+      }
+
+      handleIncomingPayload(String(event.data));
+    };
+
+    ws.onerror = () => {
+      setWsStatus("error");
+      setIsWaiting(false);
+      pushMessage("system", `WebSocket 오류: ${endpoint} 에 연결할 수 없습니다.`);
+    };
+
+    ws.onclose = (event) => {
+      if (wsRef.current === ws) {
+        wsRef.current = null;
+      }
+      setIsWaiting(false);
+      setWsStatus(event.wasClean ? "disconnected" : "error");
+      const reason = event.reason ? ` (${event.reason})` : "";
+      pushMessage("system", `RMS /chat 연결 종료 [${event.code}]${reason}`);
+    };
+  };
+
+  const disconnectChat = () => {
+    setIsWaiting(false);
+    wsRef.current?.close();
+    wsRef.current = null;
+    setWsStatus("disconnected");
+  };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();
-      handleSubmit();
+      void handleSubmit();
     }
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const trimmed = draft.trim();
-    if (!trimmed) {
+    if (!trimmed || isWaiting) {
       return;
     }
 
-    const providerLabel = providerLabels[provider];
-    setMessages((current) => [
-      ...current,
-      createMessage("user", trimmed),
-      createMessage(
-        "assistant",
-        `${providerLabel} MCP 브리지 준비 완료. 현재 ros2_mcp_server 연결 전 단계입니다.\n\n예상 실행: robot.lookup_status → navigation.review_queue → operator.confirm_dispatch`,
-      ),
-    ]);
+    pushMessage("user", trimmed);
     setDraft("");
+
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN || wsStatus !== "connected") {
+      pushMessage("system", "RMS /chat 서버에 연결되어 있지 않습니다. 설정에서 Connect Chat을 누르세요.");
+      return;
+    }
+
+    setIsWaiting(true);
+    ws.send(
+      JSON.stringify({
+        message: trimmed,
+        provider,
+        robot_id: robotId,
+      }),
+    );
   };
 
   return (
@@ -121,7 +387,7 @@ export function MCPChatPanel({
         <div className="rcs-mcp-panel__title-area">
           <span className="rcs-mcp-panel__eyebrow">AI Mission Control</span>
           <div className="rcs-mcp-panel__provider-tabs" role="tablist" aria-label="AI provider">
-            {(["claude", "chatgpt"] as MCPProvider[]).map((item) => (
+            {(["claude", "chatgpt", "ollama"] as MCPProvider[]).map((item) => (
               <button
                 key={item}
                 type="button"
@@ -137,112 +403,201 @@ export function MCPChatPanel({
         </div>
 
         <div className="rcs-mcp-panel__header-right">
+          <span className={`rcs-mcp-status rcs-mcp-status--${wsStatus}`}>
+            {WS_STATUS_LABEL[wsStatus]}
+          </span>
           <button
             type="button"
             className={`rcs-mcp-config-toggle${configOpen ? " is-open" : ""}`}
             aria-label="Toggle configuration"
-            onClick={() => setConfigOpen((v) => !v)}
+            onClick={() => setConfigOpen((value) => !value)}
           >
             <GearIcon />
           </button>
         </div>
       </div>
 
-      {configOpen && (
-        <div className="rcs-mcp-panel__config">
-          <label className="rcs-field">
-            <span>MCP Endpoint</span>
-            <input
-              value={endpoint}
-              onChange={(e) => setEndpoint(e.target.value)}
-              placeholder="ws://host:port/mcp"
-            />
-          </label>
-          <label className="rcs-field">
-            <span>Session Scope</span>
-            <input
-              value={sessionLabel}
-              onChange={(e) => setSessionLabel(e.target.value)}
-              placeholder="robot-id / operator-room"
-            />
-          </label>
+      {configOpen && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="rcs-mcp-config-modal-backdrop"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Connection settings"
+              onClick={() => setConfigOpen(false)}
+            >
+              <div
+                ref={configModalRef}
+                className="rcs-mcp-config-modal"
+                tabIndex={-1}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="rcs-mcp-config-modal__header">
+                  <div>
+                    <strong>Connection Settings</strong>
+                    <p>RMS /chat 소켓과 MQTT 연결 설정을 같은 방식으로 관리합니다.</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="rcs-close-button"
+                    aria-label="Close connection settings"
+                    onClick={() => setConfigOpen(false)}
+                  >
+                    <CloseIcon />
+                  </button>
+                </div>
 
-          <div className="rcs-mcp-config-divider">MQTT</div>
+                <div className="rcs-mcp-config-modal__body">
+                  <section className="rcs-mcp-config-card">
+                    <div className="rcs-mcp-config-card__header">
+                      <div>
+                        <span className="rcs-mcp-config-card__eyebrow">CHAT</span>
+                        <h3>RMS Chat Socket</h3>
+                      </div>
+                      <span className={`rcs-mcp-status rcs-mcp-status--${wsStatus}`}>
+                        {WS_STATUS_LABEL[wsStatus]}
+                      </span>
+                    </div>
 
-          <label className="rcs-field">
-            <span>Broker URL</span>
-            <input
-              value={mqttUrl}
-              onChange={(e) => onMqttUrlChange(e.target.value)}
-              placeholder="ws://host:9001/mqtt"
-            />
-          </label>
-          <label className="rcs-field">
-            <span>Robot ID</span>
-            <input
-              value={robotId}
-              onChange={(e) => onRobotIdChange(e.target.value)}
-              placeholder="burger1"
-            />
-          </label>
+                    <label className="rcs-field">
+                      <span>Endpoint</span>
+                      <input
+                        value={endpoint}
+                        onChange={(event) => setEndpoint(event.target.value)}
+                        placeholder="ws://host:port/chat"
+                      />
+                    </label>
 
-          <div className="rcs-mcp-config-actions">
-            <button type="button" className="rcs-button rcs-button--teal" onClick={onConnect}>
-              Connect
-            </button>
-            <button type="button" className="rcs-button rcs-button--danger" onClick={onDisconnect}>
-              Disconnect
-            </button>
-          </div>
-        </div>
-      )}
+                    <div className="rcs-mcp-config-actions rcs-mcp-config-actions--single">
+                      {wsStatus === "connected" ? (
+                        <button type="button" className="rcs-button rcs-button--danger" onClick={disconnectChat}>
+                          Disconnect Chat
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className={`rcs-button rcs-button--teal${wsStatus === "connecting" ? " rcs-button--armed-goal" : ""}`}
+                          onClick={connectChat}
+                          disabled={wsStatus === "connecting"}
+                        >
+                          {wsStatus === "connecting" ? "Connecting..." : "Connect Chat"}
+                        </button>
+                      )}
+                    </div>
+                  </section>
+
+                  <section className="rcs-mcp-config-card">
+                    <div className="rcs-mcp-config-card__header">
+                      <div>
+                        <span className="rcs-mcp-config-card__eyebrow">MQTT</span>
+                        <h3>Broker Session</h3>
+                      </div>
+                    </div>
+
+                    <div className="rcs-mcp-config-grid">
+                      <label className="rcs-field">
+                        <span>Broker URL</span>
+                        <input
+                          value={mqttUrl}
+                          onChange={(event) => onMqttUrlChange(event.target.value)}
+                          placeholder="ws://host:9001/mqtt"
+                        />
+                      </label>
+                      <label className="rcs-field">
+                        <span>Robot ID</span>
+                        <input
+                          value={robotId}
+                          onChange={(event) => onRobotIdChange(event.target.value)}
+                          placeholder="burger1"
+                        />
+                      </label>
+                    </div>
+
+                    <div className="rcs-mcp-config-actions">
+                      <button type="button" className="rcs-button rcs-button--teal" onClick={onConnect}>
+                        Connect MQTT
+                      </button>
+                      <button type="button" className="rcs-button rcs-button--danger" onClick={onDisconnect}>
+                        Disconnect MQTT
+                      </button>
+                    </div>
+                  </section>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
 
       <div ref={chatlogRef} className="rcs-mcp-chatlog" aria-live="polite">
         {!hasUserMessage && (
           <div className="rcs-mcp-starters">
             <p className="rcs-mcp-starters__label">Quick prompts</p>
             {starterPrompts.map((prompt) => (
-              <button
-                key={prompt}
-                type="button"
-                className="rcs-mcp-prompt"
-                onClick={() => setDraft(prompt)}
-              >
+              <button key={prompt} type="button" className="rcs-mcp-prompt" onClick={() => setDraft(prompt)}>
                 {prompt}
               </button>
             ))}
           </div>
         )}
 
-        {messages
-          .filter((m) => m.role !== "system")
-          .map((message) => (
-            <article key={message.id} className={`rcs-mcp-message rcs-mcp-message--${message.role}`}>
-              <MessageAvatar role={message.role} provider={provider} />
+        {messages.map((message) => {
+          if (message.role === "system") {
+            return (
+              <div key={message.id} className="rcs-mcp-system-note">
+                {message.content}
+              </div>
+            );
+          }
+
+          const categoryClass = toCategoryClass(message.category);
+
+          return (
+            <article
+              key={message.id}
+              className={`rcs-mcp-message rcs-mcp-message--${message.role}${categoryClass ? ` rcs-mcp-message--category-${categoryClass}` : ""}`}
+            >
+              <MessageAvatar role={message.role} provider={provider} category={message.category} />
               <div className="rcs-mcp-bubble">
                 <p>{message.content}</p>
                 <time className="rcs-mcp-message__time">{message.timestamp}</time>
               </div>
             </article>
-          ))}
+          );
+        })}
+
+        {isWaiting && (
+          <div className="rcs-mcp-message rcs-mcp-message--assistant">
+            <MessageAvatar role="assistant" provider={provider} category="assistant" />
+            <div className="rcs-mcp-bubble">
+              <div className="rcs-mcp-typing">
+                <span />
+                <span />
+                <span />
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="rcs-mcp-composer">
         <textarea
           className="rcs-mcp-composer__input"
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(event) => setDraft(event.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={`Message ${providerLabels[provider]}…`}
+          placeholder={`Message ${providerLabels[provider]}...`}
+          disabled={isWaiting}
         />
         <div className="rcs-mcp-composer__actions">
           <span className="rcs-mcp-composer__hint">Ctrl+Enter로 전송</span>
           <button
             type="button"
             className={`rcs-button rcs-button--${provider}`}
-            onClick={handleSubmit}
+            onClick={() => void handleSubmit()}
+            disabled={wsStatus !== "connected"}
           >
-            Send to {providerLabels[provider]}
+            {isWaiting ? "Waiting..." : `Send to ${providerLabels[provider]}`}
           </button>
         </div>
       </div>
