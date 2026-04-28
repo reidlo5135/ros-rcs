@@ -23,6 +23,8 @@ var metric_grid: MeshInstance3D
 var map_layer: Node3D
 var global_costmap_layer: Node3D
 var local_costmap_layer: Node3D
+var global_path_layer: MeshInstance3D
+var local_path_layer: MeshInstance3D
 var robot_layer: Node3D
 var tf_layer: Node3D
 var camera_target := Vector3.ZERO
@@ -137,6 +139,12 @@ func _build_layers() -> void:
 	local_costmap_layer.map_layout_changed.connect(_on_map_layout_changed)
 	add_child(local_costmap_layer)
 
+	global_path_layer = _build_path_layer("GlobalPathLayer")
+	add_child(global_path_layer)
+
+	local_path_layer = _build_path_layer("LocalPathLayer")
+	add_child(local_path_layer)
+
 	robot_layer = RobotLayerScript.new()
 	robot_layer.name = "RobotLayer"
 	add_child(robot_layer)
@@ -150,6 +158,13 @@ func _build_waypoint_layer() -> void:
 	waypoint_root = Node3D.new()
 	waypoint_root.name = "WaypointLayer"
 	add_child(waypoint_root)
+
+
+func _build_path_layer(name: String) -> MeshInstance3D:
+	var layer := MeshInstance3D.new()
+	layer.name = name
+	layer.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return layer
 
 
 func _on_telemetry_updated(session_id: String, patch: Dictionary) -> void:
@@ -175,6 +190,8 @@ func _apply_active_state() -> void:
 		global_costmap_layer.apply_state(state)
 	if local_costmap_layer != null and local_costmap_layer.has_method("apply_state"):
 		local_costmap_layer.apply_state(state)
+	_apply_path_layer(global_path_layer, state.global_path, Color(0.13, 0.85, 1.0), WAYPOINT_Y_OFFSET + 0.015)
+	_apply_path_layer(local_path_layer, state.local_path, Color(0.57, 0.87, 0.12), WAYPOINT_Y_OFFSET + 0.025)
 	if robot_layer != null and robot_layer.has_method("apply_state"):
 		robot_layer.apply_state(state)
 		_update_robot_camera_reference(state.robot_pose)
@@ -196,6 +213,10 @@ func _apply_patch_state(patch: Dictionary) -> void:
 		global_costmap_layer.apply_state(state)
 	if patch.has("local_costmap") and local_costmap_layer != null and local_costmap_layer.has_method("apply_state"):
 		local_costmap_layer.apply_state(state)
+	if patch.has("global_path"):
+		_apply_path_layer(global_path_layer, state.global_path, Color(0.13, 0.85, 1.0), WAYPOINT_Y_OFFSET + 0.015)
+	if patch.has("local_path"):
+		_apply_path_layer(local_path_layer, state.local_path, Color(0.57, 0.87, 0.12), WAYPOINT_Y_OFFSET + 0.025)
 	if _patch_touches_robot(patch) and robot_layer != null and robot_layer.has_method("apply_state"):
 		robot_layer.apply_state(state)
 		_update_robot_camera_reference(state.robot_pose)
@@ -213,7 +234,7 @@ func _patch_touches_robot(patch: Dictionary) -> bool:
 
 
 func _patch_touches_tf(patch: Dictionary) -> bool:
-	for key in ["tf", "tf_static", "robot_pose"]:
+	for key in ["tf", "tf_static", "robot_pose", "urdf_model", "robot_description"]:
 		if patch.has(key):
 			return true
 	return false
@@ -272,9 +293,15 @@ func set_visualization_layer_visible(layer_id: String, enabled: bool) -> void:
 		"tf":
 			if tf_layer != null:
 				tf_layer.visible = enabled
-		"waypoints", "global_plan", "local_plan":
+		"waypoints":
 			if waypoint_root != null:
 				waypoint_root.visible = enabled
+		"global_plan":
+			if global_path_layer != null:
+				global_path_layer.visible = enabled
+		"local_plan":
+			if local_path_layer != null:
+				local_path_layer.visible = enabled
 		_:
 			pass
 
@@ -469,6 +496,69 @@ func _waypoint_material(color: Color) -> StandardMaterial3D:
 	return material
 
 
+func _apply_path_layer(layer: MeshInstance3D, path_message: Variant, color: Color, y_offset: float) -> void:
+	if layer == null:
+		return
+	var points := _path_points(path_message)
+	if points.size() < 2:
+		layer.mesh = null
+		return
+
+	var mesh := ImmediateMesh.new()
+	mesh.surface_begin(Mesh.PRIMITIVE_LINES, _path_material(color))
+	for index in range(points.size() - 1):
+		mesh.surface_add_vertex(points[index] + Vector3(0.0, y_offset, 0.0))
+		mesh.surface_add_vertex(points[index + 1] + Vector3(0.0, y_offset, 0.0))
+	mesh.surface_end()
+	layer.mesh = mesh
+
+
+func _path_points(path_message: Variant) -> PackedVector3Array:
+	var points := PackedVector3Array()
+	if typeof(path_message) != TYPE_DICTIONARY:
+		return points
+	var message: Dictionary = path_message
+	var poses_value: Variant = message.get("poses", [])
+	if typeof(poses_value) != TYPE_ARRAY:
+		return points
+	for pose_value in poses_value:
+		var point: Variant = _path_point_from_pose(pose_value)
+		if point != null:
+			points.append(point)
+	return points
+
+
+func _path_point_from_pose(pose_value: Variant) -> Variant:
+	if typeof(pose_value) != TYPE_DICTIONARY:
+		return null
+	var wrapper: Dictionary = pose_value
+	var nested_pose: Variant = wrapper.get("pose", wrapper)
+	if typeof(nested_pose) == TYPE_DICTIONARY and (nested_pose as Dictionary).has("pose"):
+		nested_pose = (nested_pose as Dictionary).get("pose", {})
+	if typeof(nested_pose) != TYPE_DICTIONARY:
+		return null
+	var pose: Dictionary = nested_pose
+	var position_value: Variant = pose.get("position", {})
+	if typeof(position_value) != TYPE_DICTIONARY:
+		return null
+	var position: Dictionary = position_value
+	return Vector3(
+		float(position.get("x", 0.0)),
+		float(position.get("z", 0.0)),
+		-float(position.get("y", 0.0))
+	)
+
+
+func _path_material(color: Color) -> StandardMaterial3D:
+	var material := StandardMaterial3D.new()
+	material.albedo_color = color
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.no_depth_test = true
+	material.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	material.render_priority = 30
+	return material
+
+
 func _location_marker_mesh() -> Mesh:
 	var mesh := ImmediateMesh.new()
 	var material := _waypoint_material(Color(1.0, 0.62, 0.08))
@@ -598,7 +688,7 @@ func _update_camera() -> void:
 func _update_first_person_camera() -> void:
 	camera.projection = Camera3D.PROJECTION_PERSPECTIVE
 	camera.fov = 72.0
-	var forward := Vector3(sin(last_robot_yaw), 0.0, -cos(last_robot_yaw)).normalized()
+	var forward := Vector3(cos(last_robot_yaw), 0.0, -sin(last_robot_yaw)).normalized()
 	var eye := last_robot_position + Vector3(0.0, 0.34, 0.0) - (forward * 0.08)
 	camera.position = eye
 	camera.look_at(eye + forward + Vector3(0.0, -0.08, 0.0), Vector3.UP)

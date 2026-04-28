@@ -70,7 +70,7 @@ func _build_proxy_robot() -> void:
 
 	heading = MeshInstance3D.new()
 	heading.name = "RobotHeading"
-	heading.position = Vector3(0.0, 0.16, -0.44)
+	heading.position = Vector3(0.44, 0.16, 0.0)
 	heading.mesh = heading_mesh
 	heading.material_override = heading_material
 	add_child(heading)
@@ -82,7 +82,7 @@ func _apply_pose(robot_pose: Dictionary) -> void:
 
 	var pose := _extract_pose(robot_pose)
 	position = Vector3(float(pose.get("x", 0.0)), ROBOT_RENDER_Y, -float(pose.get("y", 0.0)))
-	rotation.y = -float(pose.get("yaw", 0.0))
+	rotation.y = float(pose.get("yaw", 0.0))
 
 
 func _extract_pose(robot_pose: Dictionary) -> Dictionary:
@@ -348,7 +348,7 @@ func _build_base_proxy_node(link_name: String) -> Node3D:
 	nose_mesh.size = CHASSIS_NOSE_SIZE
 	nose.mesh = nose_mesh
 	nose.material_override = _nose_material()
-	nose.position = Vector3(0.0, 0.05, -0.084)
+	nose.position = Vector3(0.084, 0.05, 0.0)
 	root.add_child(nose)
 
 	var status_light := MeshInstance3D.new()
@@ -357,7 +357,7 @@ func _build_base_proxy_node(link_name: String) -> Node3D:
 	light_mesh.height = 0.024
 	status_light.mesh = light_mesh
 	status_light.material_override = _sensor_material(0.62)
-	status_light.position = Vector3(0.0, 0.061, -0.055)
+	status_light.position = Vector3(0.055, 0.061, 0.0)
 	root.add_child(status_light)
 
 	var integrated_lidar := _build_lidar_proxy_node("integrated_lidar")
@@ -548,7 +548,7 @@ func _transform_from_origin(origin_value: Variant) -> Transform3D:
 	var xyz := _parse_triplet(str(origin.get("xyz", "")), Vector3.ZERO)
 	var rpy := _parse_triplet(str(origin.get("rpy", "")), Vector3.ZERO)
 	var position := Vector3(xyz.x, xyz.z, -xyz.y)
-	var rotation := Vector3(rpy.x, -rpy.z, rpy.y)
+	var rotation := Vector3(rpy.x, rpy.z, -rpy.y)
 	return Transform3D(Basis.from_euler(rotation), position)
 
 

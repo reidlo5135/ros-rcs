@@ -2,12 +2,13 @@ extends "res://src/scene/layers/visualization_layer.gd"
 class_name RcsTfLayer
 
 @export var y_offset := 0.28
-@export var axis_length := 0.32
+@export var axis_length := 0.5
 @export var max_frames := 80
 @export var min_rebuild_interval_msec := 250
 
 var frame_root: Node3D
 var edge_store: Dictionary = {}
+var frame_nodes: Dictionary = {}
 var last_rebuild_msec := 0
 
 
@@ -32,11 +33,13 @@ func apply_state(_state: Variant) -> void:
 
 	_merge_edges(_state.get("tf_static"))
 	_merge_edges(_state.get("tf"))
+	var edges := edge_store.duplicate(true)
+	_merge_urdf_edges(_state.get("urdf_model"), edges)
 
-	var frames := _resolved_frames(edge_store)
+	var frames := _resolved_frames(edges, _state.get("robot_pose"))
 	if frames.is_empty():
-		var fallback := _frame_from_robot_pose(_state.get("robot_pose"))
-		if not fallback.is_empty():
+		var fallback: Variant = _frame_transform_from_robot_pose(_state.get("robot_pose"))
+		if typeof(fallback) == TYPE_TRANSFORM3D:
 			frames["base_link"] = fallback
 
 	_rebuild_frames(frames)
@@ -52,9 +55,31 @@ func _merge_edges(message: Variant) -> void:
 		var child := _normalize_frame_id(str(transform.get("child_frame_id", "")))
 		if parent.is_empty() or child.is_empty():
 			continue
-		var pose := _pose_from_transform(transform.get("transform", {}))
-		pose["parent"] = parent
-		edge_store[child] = pose
+		edge_store[child] = {
+			"parent": parent,
+			"transform": _transform_from_tf(transform.get("transform", {})),
+		}
+
+
+func _merge_urdf_edges(urdf_model: Variant, edges: Dictionary) -> void:
+	if typeof(urdf_model) != TYPE_DICTIONARY:
+		return
+	var model: Dictionary = urdf_model
+	var joints: Dictionary = model.get("joints", {})
+	var joint_order: Array = model.get("joint_order", [])
+	for joint_name_value in joint_order:
+		var joint_name := str(joint_name_value)
+		if not joints.has(joint_name):
+			continue
+		var joint: Dictionary = joints[joint_name]
+		var parent := _normalize_frame_id(str(joint.get("parent", "")))
+		var child := _normalize_frame_id(str(joint.get("child", "")))
+		if parent.is_empty() or child.is_empty() or edges.has(child):
+			continue
+		edges[child] = {
+			"parent": parent,
+			"transform": _transform_from_origin(joint.get("origin", {})),
+		}
 
 
 func _transforms_from(message: Variant) -> Array:
@@ -71,9 +96,9 @@ func _parent_frame_id(transform: Dictionary) -> String:
 	return ""
 
 
-func _pose_from_transform(transform_value: Variant) -> Dictionary:
+func _transform_from_tf(transform_value: Variant) -> Transform3D:
 	if typeof(transform_value) != TYPE_DICTIONARY:
-		return {"x": 0.0, "y": 0.0, "z": 0.0, "yaw": 0.0}
+		return Transform3D.IDENTITY
 	var transform: Dictionary = transform_value
 	var translation: Variant = transform.get("translation", {})
 	var rotation: Variant = transform.get("rotation", {})
@@ -84,18 +109,16 @@ func _pose_from_transform(transform_value: Variant) -> Dictionary:
 		x = float((translation as Dictionary).get("x", 0.0))
 		y = float((translation as Dictionary).get("y", 0.0))
 		z = float((translation as Dictionary).get("z", 0.0))
-	return {
-		"x": x,
-		"y": y,
-		"z": z,
-		"yaw": _yaw_from_rotation(rotation),
-	}
+	return Transform3D(
+		Basis.from_euler(_rotation_from_quaternion(rotation)),
+		Vector3(x, z, -y)
+	)
 
 
-func _resolved_frames(edges: Dictionary) -> Dictionary:
+func _resolved_frames(edges: Dictionary, robot_pose: Variant) -> Dictionary:
 	var frames := {}
 	var cache := {
-		"map": {"x": 0.0, "y": 0.0, "z": 0.0, "yaw": 0.0},
+		"map": Transform3D.IDENTITY,
 	}
 	var frame_names := edges.keys()
 	frame_names.sort()
@@ -103,10 +126,17 @@ func _resolved_frames(edges: Dictionary) -> Dictionary:
 		if frames.size() >= max_frames:
 			break
 		var resolved: Variant = _resolve_frame(str(frame_id), edges, cache, 0)
-		if typeof(resolved) == TYPE_DICTIONARY:
+		if typeof(resolved) == TYPE_TRANSFORM3D:
 			frames[str(frame_id)] = resolved
-	if not frames.is_empty():
-		frames["map"] = cache["map"]
+	for root_frame in ["map", "odom", "base_footprint", "base_link"]:
+		if cache.has(root_frame) and not frames.has(root_frame):
+			frames[root_frame] = cache[root_frame]
+	var fallback: Variant = _frame_transform_from_robot_pose(robot_pose)
+	if typeof(fallback) == TYPE_TRANSFORM3D:
+		if not frames.has("base_link"):
+			frames["base_link"] = fallback
+		if not frames.has("base_footprint"):
+			frames["base_footprint"] = fallback
 	return frames
 
 
@@ -121,91 +151,91 @@ func _resolve_frame(frame_id: String, edges: Dictionary, cache: Dictionary, dept
 
 	var edge: Dictionary = edges[clean_frame]
 	var parent := _normalize_frame_id(str(edge.get("parent", "")))
-	var parent_pose: Variant = _resolve_frame(parent, edges, cache, depth + 1)
-	if typeof(parent_pose) != TYPE_DICTIONARY:
+	var parent_transform: Variant = _resolve_frame(parent, edges, cache, depth + 1)
+	if typeof(parent_transform) != TYPE_TRANSFORM3D:
 		return null
 
-	var parent_yaw := float((parent_pose as Dictionary).get("yaw", 0.0))
-	var local_x := float(edge.get("x", 0.0))
-	var local_y := float(edge.get("y", 0.0))
-	var cos_yaw := cos(parent_yaw)
-	var sin_yaw := sin(parent_yaw)
-	var resolved := {
-		"x": float((parent_pose as Dictionary).get("x", 0.0)) + (local_x * cos_yaw) - (local_y * sin_yaw),
-		"y": float((parent_pose as Dictionary).get("y", 0.0)) + (local_x * sin_yaw) + (local_y * cos_yaw),
-		"z": float((parent_pose as Dictionary).get("z", 0.0)) + float(edge.get("z", 0.0)),
-		"yaw": parent_yaw + float(edge.get("yaw", 0.0)),
-	}
+	var local_transform: Variant = edge.get("transform", Transform3D.IDENTITY)
+	if typeof(local_transform) != TYPE_TRANSFORM3D:
+		local_transform = Transform3D.IDENTITY
+	var resolved: Transform3D = (parent_transform as Transform3D) * (local_transform as Transform3D)
 	cache[clean_frame] = resolved
 	return resolved
 
 
-func _frame_from_robot_pose(robot_pose: Variant) -> Dictionary:
+func _frame_transform_from_robot_pose(robot_pose: Variant) -> Variant:
 	if typeof(robot_pose) != TYPE_DICTIONARY or (robot_pose as Dictionary).is_empty():
-		return {}
+		return null
 	var pose_dict: Dictionary = robot_pose
 	if pose_dict.has("x") or pose_dict.has("y"):
-		return {
-			"x": float(pose_dict.get("x", 0.0)),
-			"y": float(pose_dict.get("y", 0.0)),
-			"z": 0.0,
-			"yaw": float(pose_dict.get("yaw", pose_dict.get("theta", 0.0))),
-		}
+		var yaw := float(pose_dict.get("yaw", pose_dict.get("theta", 0.0)))
+		return Transform3D(
+			Basis.from_euler(Vector3(0.0, yaw, 0.0)),
+			Vector3(float(pose_dict.get("x", 0.0)), 0.0, -float(pose_dict.get("y", 0.0)))
+		)
 
 	var pose_value: Variant = pose_dict.get("pose", pose_dict)
 	if typeof(pose_value) == TYPE_DICTIONARY and (pose_value as Dictionary).has("pose"):
 		pose_value = (pose_value as Dictionary)["pose"]
 	if typeof(pose_value) != TYPE_DICTIONARY:
-		return {}
+		return null
 
 	var nested_pose: Dictionary = pose_value
 	var position_value: Variant = nested_pose.get("position", {})
 	var orientation_value: Variant = nested_pose.get("orientation", {})
-	return {
-		"x": float((position_value as Dictionary).get("x", 0.0)) if typeof(position_value) == TYPE_DICTIONARY else 0.0,
-		"y": float((position_value as Dictionary).get("y", 0.0)) if typeof(position_value) == TYPE_DICTIONARY else 0.0,
-		"z": float((position_value as Dictionary).get("z", 0.0)) if typeof(position_value) == TYPE_DICTIONARY else 0.0,
-		"yaw": _yaw_from_rotation(orientation_value),
-	}
+	var position := Vector3.ZERO
+	if typeof(position_value) == TYPE_DICTIONARY:
+		var source_position := position_value as Dictionary
+		position = Vector3(
+			float(source_position.get("x", 0.0)),
+			float(source_position.get("z", 0.0)),
+			-float(source_position.get("y", 0.0))
+		)
+	return Transform3D(Basis.from_euler(_rotation_from_quaternion(orientation_value)), position)
 
 
 func _rebuild_frames(frames: Dictionary) -> void:
-	for child in frame_root.get_children():
-		child.queue_free()
+	for frame_id in frame_nodes.keys():
+		if not frames.has(frame_id):
+			frame_nodes[frame_id].queue_free()
+			frame_nodes.erase(frame_id)
 
-	var frame_names := frames.keys()
-	frame_names.sort()
-	for frame_id in frame_names:
-		var pose: Dictionary = frames[frame_id]
-		_add_frame_axes(str(frame_id), pose)
+	for frame_id in frames.keys():
+		var frame_transform: Transform3D = frames[frame_id]
+		var adjusted := frame_transform
+		adjusted.origin += Vector3(0.0, y_offset, 0.0)
+		if frame_nodes.has(frame_id):
+			frame_nodes[frame_id].transform = adjusted
+		else:
+			_add_frame_axes(str(frame_id), frame_transform)
 
 
-func _add_frame_axes(frame_id: String, pose: Dictionary) -> void:
+func _add_frame_axes(frame_id: String, frame_transform: Transform3D) -> void:
 	var frame := Node3D.new()
 	frame.name = _safe_node_name(frame_id)
-	frame.position = Vector3(
-		float(pose.get("x", 0.0)),
-		y_offset + float(pose.get("z", 0.0)),
-		-float(pose.get("y", 0.0))
-	)
-	frame.rotation.y = -float(pose.get("yaw", 0.0))
+	var adjusted := frame_transform
+	adjusted.origin += Vector3(0.0, y_offset, 0.0)
+	frame.transform = adjusted
 	frame_root.add_child(frame)
+	frame_nodes[frame_id] = frame
 
-	var x_axis := _axis_mesh(Color(0.95, 0.22, 0.18), Vector3(axis_length, 0.018, 0.018))
+	var x_axis := _cylinder_axis_node(Color(0.95, 0.22, 0.18), axis_length)
 	x_axis.position.x = axis_length * 0.5
+	x_axis.rotation_degrees.z = -90.0
 	frame.add_child(x_axis)
 
-	var y_axis := _axis_mesh(Color(0.18, 0.78, 0.26), Vector3(0.018, 0.018, axis_length))
+	var y_axis := _cylinder_axis_node(Color(0.18, 0.78, 0.26), axis_length)
 	y_axis.position.z = -axis_length * 0.5
+	y_axis.rotation_degrees.x = -90.0
 	frame.add_child(y_axis)
 
-	var z_axis := _axis_mesh(Color(0.18, 0.46, 1.0), Vector3(0.018, axis_length, 0.018))
+	var z_axis := _cylinder_axis_node(Color(0.18, 0.46, 1.0), axis_length)
 	z_axis.position.y = axis_length * 0.5
 	frame.add_child(z_axis)
 
 	var center_mesh := SphereMesh.new()
-	center_mesh.radius = 0.028
-	center_mesh.height = 0.056
+	center_mesh.radius = 0.038
+	center_mesh.height = 0.076
 	var center := MeshInstance3D.new()
 	center.name = "origin"
 	center.mesh = center_mesh
@@ -214,11 +244,14 @@ func _add_frame_axes(frame_id: String, pose: Dictionary) -> void:
 	frame.add_child(center)
 
 
-func _axis_mesh(color: Color, size: Vector3) -> MeshInstance3D:
-	var mesh := BoxMesh.new()
-	mesh.size = size
+func _cylinder_axis_node(color: Color, length: float) -> MeshInstance3D:
+	var cylinder := CylinderMesh.new()
+	cylinder.top_radius = 0.022
+	cylinder.bottom_radius = 0.022
+	cylinder.height = length
+	cylinder.radial_segments = 8
 	var node := MeshInstance3D.new()
-	node.mesh = mesh
+	node.mesh = cylinder
 	node.material_override = _axis_material(color)
 	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	return node
@@ -230,20 +263,47 @@ func _axis_material(color: Color) -> StandardMaterial3D:
 	material.albedo_color = color
 	material.no_depth_test = true
 	material.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	material.render_priority = 55
 	return material
 
 
-func _yaw_from_rotation(value: Variant) -> float:
+func _rotation_from_quaternion(value: Variant) -> Vector3:
 	if typeof(value) != TYPE_DICTIONARY:
-		return 0.0
+		return Vector3.ZERO
 	var rotation: Dictionary = value
 	if rotation.has("yaw"):
-		return float(rotation.get("yaw", 0.0))
+		return Vector3(0.0, float(rotation.get("yaw", 0.0)), 0.0)
 	var x := float(rotation.get("x", 0.0))
 	var y := float(rotation.get("y", 0.0))
 	var z := float(rotation.get("z", 0.0))
 	var w := float(rotation.get("w", 1.0))
-	return atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+	var roll := atan2(2.0 * (w * x + y * z), 1.0 - 2.0 * (x * x + y * y))
+	var sin_pitch := 2.0 * (w * y - z * x)
+	var pitch := asin(clamp(sin_pitch, -1.0, 1.0))
+	var yaw := atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+	return Vector3(roll, yaw, pitch)
+
+
+func _transform_from_origin(origin_value: Variant) -> Transform3D:
+	if typeof(origin_value) != TYPE_DICTIONARY:
+		return Transform3D.IDENTITY
+	var origin: Dictionary = origin_value
+	var xyz := _parse_triplet(str(origin.get("xyz", "")), Vector3.ZERO)
+	var rpy := _parse_triplet(str(origin.get("rpy", "")), Vector3.ZERO)
+	var position := Vector3(xyz.x, xyz.z, -xyz.y)
+	var rotation := Vector3(rpy.x, rpy.z, -rpy.y)
+	return Transform3D(Basis.from_euler(rotation), position)
+
+
+func _parse_triplet(text: String, fallback: Vector3) -> Vector3:
+	var tokens := text.strip_edges().split(" ", false)
+	if tokens.size() < 3:
+		return fallback
+	return Vector3(
+		float(tokens[0]) if tokens[0].is_valid_float() else fallback.x,
+		float(tokens[1]) if tokens[1].is_valid_float() else fallback.y,
+		float(tokens[2]) if tokens[2].is_valid_float() else fallback.z
+	)
 
 
 func _normalize_frame_id(value: String) -> String:

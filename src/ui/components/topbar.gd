@@ -5,6 +5,7 @@ const APP_VERSION := "0.2.0"
 signal control_mode_changed(mode: String)
 
 var connection_label: Label
+var battery_label: Label
 var manual_button: Button
 var ai_button: Button
 var current_mode := "manual"
@@ -14,6 +15,7 @@ func _ready() -> void:
 	_build_ui()
 	connection_label.text = AppState.connection_state
 	AppState.connection_state_changed.connect(_on_connection_state_changed)
+	SessionRegistry.telemetry_updated.connect(_on_telemetry_updated)
 
 
 func _build_ui() -> void:
@@ -56,7 +58,8 @@ func _build_ui() -> void:
 	manual_button.button_pressed = true
 
 	row.add_child(_chip("signal --", 82))
-	row.add_child(_chip("battery --%", 98))
+	battery_label = _chip("battery --%", 98)
+	row.add_child(battery_label)
 	row.add_child(_chip("v" + APP_VERSION, 54))
 
 
@@ -114,3 +117,21 @@ func _chip_style(bg := Color(0.035, 0.043, 0.055), border := Color(0.16, 0.19, 0
 
 func _on_connection_state_changed(next_state: String) -> void:
 	connection_label.text = next_state
+
+
+func _on_telemetry_updated(session_id: String, _patch: Dictionary) -> void:
+	if session_id != SessionRegistry.active_session_id or battery_label == null:
+		return
+	if not SessionRegistry.sessions.has(session_id):
+		return
+	var session := SessionRegistry.sessions[session_id] as Dictionary
+	var state: Variant = session.get("state")
+	if state == null:
+		return
+	var battery: Variant = state.get("battery_state")
+	if typeof(battery) != TYPE_DICTIONARY or (battery as Dictionary).is_empty():
+		return
+	var pct := float((battery as Dictionary).get("percentage", -1.0))
+	if pct < 0.0:
+		return
+	battery_label.text = "battery %.0f%%" % (pct * 100.0 if pct <= 1.0 else pct)
