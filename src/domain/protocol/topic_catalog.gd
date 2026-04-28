@@ -30,6 +30,60 @@ const COMMAND_TOPICS := {
 	"system_robot": "/amr/{robot_id}/system/robot",
 }
 
+const VIZ_TOPIC_ORDER := [
+	"map",
+	"global_costmap",
+	"local_costmap",
+	"robot_pose",
+	"global_path",
+	"local_path",
+	"motion_status",
+	"scan",
+	"battery_state",
+	"tf",
+	"tf_static",
+	"robot_description",
+]
+
+const COMMAND_TOPIC_ORDER := [
+	"navigation_command",
+	"navigation_cancel",
+	"pose_set",
+	"map_save",
+	"motion_command",
+	"segment_request",
+	"route_request",
+	"system_ping",
+	"system_robot",
+]
+
+const VIZ_TOPIC_LABELS := {
+	"map": "Map",
+	"global_costmap": "Global Costmap",
+	"local_costmap": "Local Costmap",
+	"robot_pose": "Robot Pose",
+	"global_path": "Global Plan",
+	"local_path": "Local Plan",
+	"motion_status": "Motion Status",
+	"scan": "LaserScan",
+	"battery_state": "Battery State",
+	"tf": "TF",
+	"tf_static": "TF Static",
+	"robot_description": "Robot Description",
+}
+
+const COMMAND_TOPIC_LABELS := {
+	"navigation_command": "Navigation Command",
+	"navigation_cancel": "Navigation Cancel",
+	"pose_set": "Set Initial Pose",
+	"map_save": "Map Save",
+	"motion_command": "Motion Command",
+	"segment_request": "Segment Request",
+	"route_request": "Route Request",
+	"system_ping": "System Ping",
+	"system_robot": "System Robot",
+}
+
 
 static func resolve(template: String, robot_id: String) -> String:
 	var clean_id := robot_id.strip_edges()
@@ -62,7 +116,7 @@ static func build_viz_subscriptions(robot_id: String) -> PackedStringArray:
 	_add_unique(topics, seen, "map")
 	_add_unique(topics, seen, "/robot_description")
 	_add_unique(topics, seen, "robot_description")
-	for template in VIZ_TOPICS.values():
+	for template in viz_topics().values():
 		_add_topic_variants(topics, seen, resolve(template, clean_id))
 
 	return topics
@@ -101,9 +155,53 @@ static func build_all_runtime_subscriptions(robot_id: String) -> PackedStringArr
 
 
 static func command_topic(command_key: String, robot_id: String) -> String:
-	if not COMMAND_TOPICS.has(command_key):
+	var topics := command_topics()
+	if not topics.has(command_key):
 		return ""
-	return resolve(COMMAND_TOPICS[command_key], robot_id)
+	return resolve(topics[command_key], robot_id)
+
+
+static func command_topics() -> Dictionary:
+	return _merged_topic_map("command", COMMAND_TOPICS)
+
+
+static func viz_topics() -> Dictionary:
+	return _merged_topic_map("viz", VIZ_TOPICS)
+
+
+static func topic_entries(group: String) -> Array:
+	var source := command_topics() if group == "command" else viz_topics()
+	var labels := COMMAND_TOPIC_LABELS if group == "command" else VIZ_TOPIC_LABELS
+	var order := COMMAND_TOPIC_ORDER if group == "command" else VIZ_TOPIC_ORDER
+	var entries := []
+	for key in order:
+		if not source.has(key):
+			continue
+		entries.append({
+			"key": key,
+			"label": labels.get(key, key),
+			"value": source[key],
+		})
+	return entries
+
+
+static func semantic_key_for_viz_topic(topic: String, robot_id: String) -> String:
+	var normalized := normalize(topic)
+	for key in VIZ_TOPIC_ORDER:
+		var template := str(viz_topics().get(key, ""))
+		if template.is_empty():
+			continue
+		var resolved := normalize(resolve(template, robot_id))
+		if normalized == resolved:
+			return key
+	return ""
+
+
+static func _merged_topic_map(group: String, defaults: Dictionary) -> Dictionary:
+	var merged := defaults.duplicate(true)
+	for key in defaults.keys():
+		merged[key] = AppState.topic_template(group, key, defaults[key])
+	return merged
 
 
 static func _add_topic_variants(target: PackedStringArray, seen: Dictionary, topic: String) -> void:

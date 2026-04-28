@@ -14,6 +14,14 @@ var tf_static: Dictionary = {}
 var robot_description := ""
 var urdf_model: Dictionary = {}
 var battery_state: Dictionary = {}
+var navigation_feedback: Dictionary = {}
+var navigation_status: Dictionary = {}
+var navigation_result: Dictionary = {}
+var pose_result: Dictionary = {}
+var map_result: Dictionary = {}
+var segment_response: Dictionary = {}
+var route_response: Dictionary = {}
+var system_result: Dictionary = {}
 
 
 func apply_patch(patch: Dictionary) -> void:
@@ -29,3 +37,11 @@ func clear_live_data() -> void:
 	scan.clear()
 	tf.clear()
 	motion_status.clear()
+	navigation_feedback.clear()
+	navigation_status.clear()
+	navigation_result.clear()
+	pose_result.clear()
+	map_result.clear()
+	segment_response.clear()
+	route_response.clear()
+	system_result.clear()

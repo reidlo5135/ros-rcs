@@ -2,8 +2,10 @@ extends RefCounted
 class_name RcsTelemetryRouter
 
 signal telemetry_patch(robot_id: String, patch: Dictionary)
+signal control_event(robot_id: String, domain: String, channel: String, payload: Variant)
 
 const UrdfParserScript := preload("res://src/domain/robot_model/urdf_parser.gd")
+const TopicCatalogScript := preload("res://src/domain/protocol/topic_catalog.gd")
 
 var fallback_robot_id := "burger1"
 
@@ -13,7 +15,10 @@ func route(topic: String, payload: Variant) -> void:
 	if robot_id.is_empty():
 		return
 
-	var semantic_key := _semantic_key(topic)
+	if _route_control_plane(topic, robot_id, payload):
+		return
+
+	var semantic_key := _semantic_key(topic, robot_id)
 	var patch := {}
 	match semantic_key:
 		"map":
@@ -57,7 +62,25 @@ func _extract_robot_id(topic: String) -> String:
 	return parts[index + 1]
 
 
-func _semantic_key(topic: String) -> String:
+func _route_control_plane(topic: String, robot_id: String, payload: Variant) -> bool:
+	var parts := topic.split("/", false)
+	var root_index := parts.find("amr")
+	if root_index < 0 or parts.size() <= root_index + 3:
+		return false
+	var domain := str(parts[root_index + 2])
+	var channel := str(parts[root_index + 3])
+	if domain not in ["navigation", "pose", "map", "segment", "route", "system"]:
+		return false
+	if channel not in ["feedback", "status", "result", "response"]:
+		return false
+	control_event.emit(robot_id, domain, channel, payload)
+	return true
+
+
+func _semantic_key(topic: String, robot_id: String) -> String:
+	var custom_key: String = TopicCatalogScript.semantic_key_for_viz_topic(topic, robot_id)
+	if not custom_key.is_empty():
+		return custom_key
 	var parts := topic.split("/", false)
 	for topic_group in ["viz", "telemetry"]:
 		var namespace_index := parts.find(topic_group)

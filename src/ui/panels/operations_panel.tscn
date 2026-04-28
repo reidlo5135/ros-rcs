@@ -3,5 +3,5 @@
 [ext_resource type="Script" path="res://src/ui/panels/operations_panel.gd" id="1_ops"]
 
 [node name="OperationsPanel" type="PanelContainer"]
-custom_minimum_size = Vector2(320, 0)
+custom_minimum_size = Vector2(260, 0)
 script = ExtResource("1_ops")

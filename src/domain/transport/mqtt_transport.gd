@@ -12,15 +12,21 @@ signal publish_failed(topic: String, reason: String)
 @export var inbound_buffer_size := 64 * 1024 * 1024
 @export var outbound_buffer_size := 8 * 1024 * 1024
 @export var max_queued_packets := 4096
+@export var auto_reconnect := true
+@export var reconnect_delay_msec := 2000
 
 var connected_state := false
-var keepalive_seconds := 30
+var keepalive_seconds := 300
 var client_id := ""
 
 var _socket := WebSocketPeer.new()
 var _connect_packet_sent := false
 var _packet_id := 1
 var _disconnect_emitted := false
+var _last_outbound_msec := 0
+var _last_inbound_msec := 0
+var _manual_disconnect := false
+var _reconnect_pending := false
 
 
 func connect_transport() -> void:
@@ -31,7 +37,11 @@ func connect_transport() -> void:
 	_disconnect_emitted = false
 	_connect_packet_sent = false
 	connected_state = false
+	_manual_disconnect = false
+	_reconnect_pending = false
 	client_id = "rcs-godot-%d" % Time.get_ticks_msec()
+	_touch_inbound()
+	_touch_outbound()
 
 	_socket = WebSocketPeer.new()
 	_socket.supported_protocols = PackedStringArray(["mqtt"])
@@ -41,6 +51,7 @@ func connect_transport() -> void:
 	var error := _socket.connect_to_url(broker_url)
 	if error != OK:
 		disconnected.emit("WebSocket connect failed: %s" % error)
+		_schedule_reconnect()
 		return
 
 	set_process(true)
@@ -51,8 +62,10 @@ func connect_secure() -> void:
 
 
 func disconnect_transport() -> void:
+	_manual_disconnect = true
+	_reconnect_pending = false
 	if connected_state:
-		_socket.send(_build_fixed_packet(0xE0, PackedByteArray()))
+		_send_packet(_build_fixed_packet(0xE0, PackedByteArray()))
 	_socket.close()
 	connected_state = false
 	_connect_packet_sent = false
@@ -65,7 +78,7 @@ func publish(topic: String, payload: Variant) -> void:
 		publish_failed.emit(topic, "MQTT is not connected")
 		return
 	var packet := _build_publish_packet(topic, payload)
-	var error := _socket.send(packet)
+	var error := _send_packet(packet)
 	if error != OK:
 		publish_failed.emit(topic, "Publish failed: %s" % error)
 
@@ -77,7 +90,7 @@ func subscribe(topics: PackedStringArray) -> void:
 		return
 
 	var packet := _build_subscribe_packet(topics)
-	_socket.send(packet)
+	_send_packet(packet)
 
 
 func _process(_delta: float) -> void:
@@ -86,8 +99,9 @@ func _process(_delta: float) -> void:
 
 	if state == WebSocketPeer.STATE_OPEN:
 		if not _connect_packet_sent:
-			_socket.send(_build_connect_packet())
+			_send_packet(_build_connect_packet())
 			_connect_packet_sent = true
+		_send_keepalive_if_needed()
 		while _socket.get_available_packet_count() > 0:
 			_handle_packet(_socket.get_packet())
 		return
@@ -102,11 +116,13 @@ func _process(_delta: float) -> void:
 				reason = "WebSocket closed (%d)" % code
 			connected_state = false
 			disconnected.emit(reason)
+			_schedule_reconnect()
 
 
 func _handle_packet(packet: PackedByteArray) -> void:
 	if packet.size() < 2:
 		return
+	_touch_inbound()
 
 	var packet_type := packet[0] >> 4
 	var decoded: Dictionary = _decode_remaining_length(packet, 1)
@@ -122,8 +138,50 @@ func _handle_packet(packet: PackedByteArray) -> void:
 			_handle_publish(packet, body_start, packet[0] & 0x0F)
 		9:
 			subscribed.emit(max(0, remaining_length - 2))
+		13:
+			pass
 		_:
 			pass
+
+
+func _send_keepalive_if_needed() -> void:
+	if not connected_state:
+		return
+	var now := Time.get_ticks_msec()
+	var interval_msec: int = min(20000, max(5000, int(keepalive_seconds * 1000 * 0.45)))
+	if now - _last_outbound_msec >= interval_msec:
+		_send_packet(_build_fixed_packet(0xC0, PackedByteArray()))
+
+
+func _send_packet(packet: PackedByteArray) -> Error:
+	var error := _socket.send(packet)
+	if error == OK:
+		_touch_outbound()
+	return error
+
+
+func _touch_outbound() -> void:
+	_last_outbound_msec = Time.get_ticks_msec()
+
+
+func _touch_inbound() -> void:
+	_last_inbound_msec = Time.get_ticks_msec()
+
+
+func _schedule_reconnect() -> void:
+	if _manual_disconnect or not auto_reconnect or _reconnect_pending:
+		return
+	_reconnect_pending = true
+	_reconnect_after_delay()
+
+
+func _reconnect_after_delay() -> void:
+	await get_tree().create_timer(float(reconnect_delay_msec) / 1000.0).timeout
+	if _manual_disconnect:
+		_reconnect_pending = false
+		return
+	AppState.push_event("MQTT reconnecting")
+	connect_transport()
 
 
 func _handle_connack(packet: PackedByteArray, body_start: int) -> void:
