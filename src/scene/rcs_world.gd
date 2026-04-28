@@ -1,5 +1,7 @@
 extends Node3D
 
+signal waypoint_placed(position: Vector3, yaw: float)
+
 const MapLayerScript: Script = preload("res://src/scene/layers/map_layer.gd")
 const RobotLayerScript: Script = preload("res://src/scene/layers/robot_layer.gd")
 const TfLayerScript: Script = preload("res://src/scene/layers/tf_layer.gd")
@@ -12,8 +14,12 @@ const CAMERA_MAX_ORTHO_SIZE := 80.0
 const CAMERA_MIN_HEIGHT := 4.0
 const CAMERA_MAX_HEIGHT := 120.0
 const CAMERA_ROLL_LIMIT := deg_to_rad(50.0)
+const WAYPOINT_Y_OFFSET := 0.11
+const ROBOT_TOP_LAYER_Y := 0.12
 
 var camera: Camera3D
+var floor_layer: MeshInstance3D
+var metric_grid: MeshInstance3D
 var map_layer: Node3D
 var global_costmap_layer: Node3D
 var local_costmap_layer: Node3D
@@ -30,6 +36,13 @@ var orbiting := false
 var panning := false
 var grabbing := false
 var map_auto_framed := false
+var waypoint_placement_enabled := false
+var waypoint_root: Node3D
+var waypoint_line: MeshInstance3D
+var waypoints: Array[Vector3] = []
+var camera_mode := "aim"
+var last_robot_position := Vector3.ZERO
+var last_robot_yaw := 0.0
 
 
 func _ready() -> void:
@@ -37,6 +50,7 @@ func _ready() -> void:
 	_build_light()
 	_build_floor()
 	_build_layers()
+	_build_waypoint_layer()
 	SessionRegistry.telemetry_updated.connect(_on_telemetry_updated)
 	SessionRegistry.active_session_changed.connect(_on_active_session_changed)
 	_apply_active_state()
@@ -66,17 +80,17 @@ func _build_floor() -> void:
 	material.albedo_color = Color(0.08, 0.10, 0.11)
 	material.roughness = 0.8
 
-	var floor := MeshInstance3D.new()
-	floor.name = "OccupancyFloor"
-	floor.mesh = floor_mesh
-	floor.material_override = material
-	add_child(floor)
+	floor_layer = MeshInstance3D.new()
+	floor_layer.name = "OccupancyFloor"
+	floor_layer.mesh = floor_mesh
+	floor_layer.material_override = material
+	add_child(floor_layer)
 
-	var grid := MeshInstance3D.new()
-	grid.name = "MetricGrid"
-	grid.mesh = _create_grid_mesh()
-	grid.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(grid)
+	metric_grid = MeshInstance3D.new()
+	metric_grid.name = "MetricGrid"
+	metric_grid.mesh = _create_grid_mesh()
+	metric_grid.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(metric_grid)
 
 
 func _create_grid_mesh() -> Mesh:
@@ -132,6 +146,12 @@ func _build_layers() -> void:
 	add_child(tf_layer)
 
 
+func _build_waypoint_layer() -> void:
+	waypoint_root = Node3D.new()
+	waypoint_root.name = "WaypointLayer"
+	add_child(waypoint_root)
+
+
 func _on_telemetry_updated(session_id: String, patch: Dictionary) -> void:
 	if session_id != SessionRegistry.active_session_id:
 		return
@@ -157,8 +177,10 @@ func _apply_active_state() -> void:
 		local_costmap_layer.apply_state(state)
 	if robot_layer != null and robot_layer.has_method("apply_state"):
 		robot_layer.apply_state(state)
+		_update_robot_camera_reference(state.robot_pose)
 	if tf_layer != null and tf_layer.has_method("apply_state"):
 		tf_layer.apply_state(state)
+	_update_camera()
 
 
 func _apply_patch_state(patch: Dictionary) -> void:
@@ -176,8 +198,11 @@ func _apply_patch_state(patch: Dictionary) -> void:
 		local_costmap_layer.apply_state(state)
 	if _patch_touches_robot(patch) and robot_layer != null and robot_layer.has_method("apply_state"):
 		robot_layer.apply_state(state)
+		_update_robot_camera_reference(state.robot_pose)
 	if _patch_touches_tf(patch) and tf_layer != null and tf_layer.has_method("apply_state"):
 		tf_layer.apply_state(state)
+	if _patch_touches_robot(patch):
+		_update_camera()
 
 
 func _patch_touches_robot(patch: Dictionary) -> bool:
@@ -214,7 +239,80 @@ func release_viewport_input() -> void:
 	orbiting = false
 	panning = false
 	grabbing = false
+	Input.set_default_cursor_shape(Input.CURSOR_CROSS if waypoint_placement_enabled else Input.CURSOR_ARROW)
+
+
+func set_waypoint_placement_enabled(enabled: bool) -> void:
+	waypoint_placement_enabled = enabled
+	orbiting = false
+	panning = false
+	grabbing = false
+	Input.set_default_cursor_shape(Input.CURSOR_CROSS if enabled else Input.CURSOR_ARROW)
+
+
+func set_visualization_layer_visible(layer_id: String, enabled: bool) -> void:
+	match layer_id:
+		"grid":
+			if floor_layer != null:
+				floor_layer.visible = enabled
+			if metric_grid != null:
+				metric_grid.visible = enabled
+		"map":
+			if map_layer != null:
+				map_layer.visible = enabled
+		"global_costmap":
+			if global_costmap_layer != null:
+				global_costmap_layer.visible = enabled
+		"local_costmap":
+			if local_costmap_layer != null:
+				local_costmap_layer.visible = enabled
+		"robot", "exact_footprint":
+			if robot_layer != null:
+				robot_layer.visible = enabled
+		"tf":
+			if tf_layer != null:
+				tf_layer.visible = enabled
+		"waypoints", "global_plan", "local_plan":
+			if waypoint_root != null:
+				waypoint_root.visible = enabled
+		_:
+			pass
+
+
+func set_camera_mode(next_mode: String) -> void:
+	camera_mode = next_mode
+	match camera_mode:
+		"aim":
+			top_down_mode = true
+			camera_yaw = 0.0
+			camera_pitch = deg_to_rad(-90.0)
+			camera_roll = 0.0
+			camera_distance = 32.0
+			orthographic_size = 10.0
+		"first_person":
+			top_down_mode = false
+			camera_distance = 0.01
+			camera_pitch = deg_to_rad(-8.0)
+			camera_roll = 0.0
+		_:
+			reset_camera()
+			return
+	_update_camera()
+
+
+func reset_view_modes() -> void:
+	camera_mode = "free"
+	waypoint_placement_enabled = false
 	Input.set_default_cursor_shape(Input.CURSOR_ARROW)
+	reset_camera()
+
+
+func clear_waypoints() -> void:
+	waypoints.clear()
+	if waypoint_root != null:
+		for child in waypoint_root.get_children():
+			child.queue_free()
+	waypoint_line = null
 
 
 func _handle_mouse_button(event: InputEventMouseButton) -> void:
@@ -238,6 +336,9 @@ func _handle_mouse_button(event: InputEventMouseButton) -> void:
 			panning = event.pressed
 			Input.set_default_cursor_shape(Input.CURSOR_DRAG if panning else Input.CURSOR_ARROW)
 		MOUSE_BUTTON_LEFT:
+			if waypoint_placement_enabled and event.pressed and not event.double_click:
+				_place_waypoint_from_screen(event.position)
+				return
 			if event.double_click and event.pressed:
 				reset_camera()
 			else:
@@ -247,12 +348,12 @@ func _handle_mouse_button(event: InputEventMouseButton) -> void:
 
 func _handle_mouse_motion(event: InputEventMouseMotion) -> void:
 	if orbiting:
-		top_down_mode = false
+		_enter_perspective_from_top_down()
 		camera_yaw -= event.relative.x * 0.006
 		camera_pitch = clamp(camera_pitch - event.relative.y * 0.006, deg_to_rad(-82.0), deg_to_rad(-18.0))
 		_update_camera()
 	elif grabbing and event.shift_pressed:
-		top_down_mode = false
+		_enter_perspective_from_top_down()
 		camera_yaw -= event.relative.x * 0.006
 		camera_pitch = clamp(camera_pitch - event.relative.y * 0.004, deg_to_rad(-82.0), deg_to_rad(-18.0))
 		_update_camera()
@@ -280,12 +381,130 @@ func _handle_key(event: InputEventKey) -> void:
 			_zoom_camera(1.14)
 
 
+func _place_waypoint_from_screen(screen_position: Vector2) -> void:
+	var world_position := _screen_to_ground(screen_position)
+	var yaw := 0.0
+	if not waypoints.is_empty():
+		var previous := waypoints[waypoints.size() - 1]
+		var delta := world_position - previous
+		if Vector2(delta.x, delta.z).length() > 0.001:
+			yaw = atan2(-delta.z, delta.x)
+	waypoints.append(world_position)
+	_add_waypoint_marker(world_position, yaw, waypoints.size())
+	_rebuild_waypoint_line()
+	waypoint_placed.emit(world_position, yaw)
+
+
+func _screen_to_ground(screen_position: Vector2) -> Vector3:
+	if camera == null:
+		return Vector3.ZERO
+	var origin := camera.project_ray_origin(screen_position)
+	var direction := camera.project_ray_normal(screen_position)
+	if abs(direction.y) < 0.0001:
+		return Vector3(origin.x, 0.0, origin.z)
+	var distance := -origin.y / direction.y
+	var hit := origin + (direction * distance)
+	return Vector3(hit.x, 0.0, hit.z)
+
+
+func _add_waypoint_marker(position: Vector3, yaw: float, index: int) -> void:
+	if waypoint_root == null:
+		return
+	var marker_root := Node3D.new()
+	marker_root.name = "Waypoint%d" % index
+	marker_root.position = Vector3(position.x, WAYPOINT_Y_OFFSET, position.z)
+	marker_root.rotation.y = -yaw
+	waypoint_root.add_child(marker_root)
+
+	var marker_mesh := _location_marker_mesh()
+	var marker := MeshInstance3D.new()
+	marker.name = "LocationMarker"
+	marker.mesh = marker_mesh
+	marker.rotation_degrees.x = -90.0
+	marker.material_override = _waypoint_material(Color(1.0, 0.62, 0.08))
+	marker_root.add_child(marker)
+
+	var center_dot := MeshInstance3D.new()
+	var dot_mesh := CylinderMesh.new()
+	dot_mesh.top_radius = 0.032
+	dot_mesh.bottom_radius = 0.032
+	dot_mesh.height = 0.008
+	dot_mesh.radial_segments = 24
+	center_dot.name = "LocationMarkerCenter"
+	center_dot.mesh = dot_mesh
+	center_dot.position = Vector3(0.0, 0.002, 0.0)
+	center_dot.material_override = _waypoint_material(Color(0.045, 0.055, 0.068))
+	marker_root.add_child(center_dot)
+
+
+func _rebuild_waypoint_line() -> void:
+	if waypoint_line != null:
+		waypoint_line.queue_free()
+		waypoint_line = null
+	if waypoints.size() < 2 or waypoint_root == null:
+		return
+
+	var mesh := ImmediateMesh.new()
+	mesh.surface_begin(Mesh.PRIMITIVE_LINES, _waypoint_material(Color(0.2, 0.85, 0.95)))
+	for index in range(waypoints.size() - 1):
+		var start := waypoints[index]
+		var end := waypoints[index + 1]
+		mesh.surface_add_vertex(Vector3(start.x, WAYPOINT_Y_OFFSET + 0.01, start.z))
+		mesh.surface_add_vertex(Vector3(end.x, WAYPOINT_Y_OFFSET + 0.01, end.z))
+	mesh.surface_end()
+
+	waypoint_line = MeshInstance3D.new()
+	waypoint_line.name = "WaypointPath"
+	waypoint_line.mesh = mesh
+	waypoint_root.add_child(waypoint_line)
+
+
+func _waypoint_material(color: Color) -> StandardMaterial3D:
+	var material := StandardMaterial3D.new()
+	material.albedo_color = color
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.no_depth_test = true
+	material.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	material.render_priority = 35
+	return material
+
+
+func _location_marker_mesh() -> Mesh:
+	var mesh := ImmediateMesh.new()
+	var material := _waypoint_material(Color(1.0, 0.62, 0.08))
+	var radius := 0.095
+	var center := Vector3(0.0, 0.12, 0.0)
+	var tip := Vector3(0.0, -0.12, 0.0)
+
+	mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES, material)
+	for index in range(24):
+		var a0 := TAU * float(index) / 24.0
+		var a1 := TAU * float(index + 1) / 24.0
+		var p0 := center + Vector3(cos(a0) * radius, sin(a0) * radius, 0.0)
+		var p1 := center + Vector3(cos(a1) * radius, sin(a1) * radius, 0.0)
+		mesh.surface_add_vertex(center)
+		mesh.surface_add_vertex(p0)
+		mesh.surface_add_vertex(p1)
+		mesh.surface_add_vertex(tip)
+		mesh.surface_add_vertex(p1)
+		mesh.surface_add_vertex(p0)
+	mesh.surface_end()
+	return mesh
+
+
 func _zoom_camera(factor: float) -> void:
 	if top_down_mode:
 		orthographic_size = clamp(orthographic_size * factor, CAMERA_MIN_ORTHO_SIZE, CAMERA_MAX_ORTHO_SIZE)
 	else:
 		camera_distance = clamp(camera_distance * factor, 1.8, 90.0)
 	_update_camera()
+
+
+func _enter_perspective_from_top_down() -> void:
+	if not top_down_mode:
+		return
+	camera_distance = clamp(orthographic_size * 1.25, 1.8, 90.0)
+	top_down_mode = false
 
 
 func _pan_camera(relative: Vector2) -> void:
@@ -305,6 +524,7 @@ func _pan_camera(relative: Vector2) -> void:
 func reset_camera() -> void:
 	camera_target = Vector3.ZERO
 	map_auto_framed = false
+	camera_mode = "free"
 	set_top_down_camera()
 
 
@@ -320,6 +540,7 @@ func frame_map(center: Vector3, width_meters: float, height_meters: float) -> vo
 
 
 func set_top_down_camera() -> void:
+	camera_mode = "free"
 	top_down_mode = true
 	camera_yaw = 0.0
 	camera_pitch = deg_to_rad(-90.0)
@@ -330,6 +551,7 @@ func set_top_down_camera() -> void:
 
 
 func set_isometric_camera() -> void:
+	camera_mode = "free"
 	top_down_mode = false
 	camera_yaw = deg_to_rad(38.0)
 	camera_pitch = deg_to_rad(-50.0)
@@ -345,6 +567,11 @@ func _move_vertical_axis(delta: float) -> void:
 
 func _update_camera() -> void:
 	if camera == null:
+		return
+	if camera_mode == "aim":
+		camera_target = last_robot_position
+	elif camera_mode == "first_person":
+		_update_first_person_camera()
 		return
 	if top_down_mode:
 		camera.projection = Camera3D.PROJECTION_ORTHOGONAL
@@ -366,3 +593,58 @@ func _update_camera() -> void:
 	var forward := (camera_target - camera.position).normalized()
 	var up := Vector3.UP.rotated(forward, camera_roll)
 	camera.look_at(camera_target, up)
+
+
+func _update_first_person_camera() -> void:
+	camera.projection = Camera3D.PROJECTION_PERSPECTIVE
+	camera.fov = 72.0
+	var forward := Vector3(sin(last_robot_yaw), 0.0, -cos(last_robot_yaw)).normalized()
+	var eye := last_robot_position + Vector3(0.0, 0.34, 0.0) - (forward * 0.08)
+	camera.position = eye
+	camera.look_at(eye + forward + Vector3(0.0, -0.08, 0.0), Vector3.UP)
+
+
+func _update_robot_camera_reference(robot_pose: Dictionary) -> void:
+	if robot_pose.is_empty():
+		return
+	var pose := _extract_robot_pose(robot_pose)
+	last_robot_position = Vector3(float(pose.get("x", 0.0)), ROBOT_TOP_LAYER_Y, -float(pose.get("y", 0.0)))
+	last_robot_yaw = float(pose.get("yaw", 0.0))
+
+
+func _extract_robot_pose(robot_pose: Dictionary) -> Dictionary:
+	if robot_pose.has("x") or robot_pose.has("y"):
+		return {
+			"x": robot_pose.get("x", 0.0),
+			"y": robot_pose.get("y", 0.0),
+			"yaw": robot_pose.get("yaw", robot_pose.get("theta", 0.0)),
+		}
+	var pose_value: Variant = robot_pose.get("pose", robot_pose)
+	if typeof(pose_value) == TYPE_DICTIONARY and pose_value.has("pose"):
+		pose_value = pose_value["pose"]
+	if typeof(pose_value) != TYPE_DICTIONARY:
+		return {}
+	var pose_dict: Dictionary = pose_value
+	var position_value: Variant = pose_dict.get("position", {})
+	var orientation_value: Variant = pose_dict.get("orientation", {})
+	var x := 0.0
+	var y := 0.0
+	var yaw := 0.0
+	if typeof(position_value) == TYPE_DICTIONARY:
+		x = float(position_value.get("x", 0.0))
+		y = float(position_value.get("y", 0.0))
+	if typeof(orientation_value) == TYPE_DICTIONARY:
+		yaw = _yaw_from_quaternion(orientation_value)
+	return {
+		"x": x,
+		"y": y,
+		"yaw": yaw,
+	}
+
+
+func _yaw_from_quaternion(value: Dictionary) -> float:
+	var x := float(value.get("x", 0.0))
+	var y := float(value.get("y", 0.0))
+	var z := float(value.get("z", 0.0))
+	var w := float(value.get("w", 1.0))
+	return atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))

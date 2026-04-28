@@ -30,3 +30,6 @@
 .idea/
 *.log
 .DS_Store
+
+*.exe
+*.pck

@@ -1,7 +1,7 @@
 extends "res://src/scene/layers/visualization_layer.gd"
 class_name RcsRobotLayer
 
-const ROBOT_RENDER_Y := 0.22
+const ROBOT_RENDER_Y := 0.02
 const MIN_MEANINGFUL_MESH_PROXY_SCALE := 0.05
 const MIN_PROXY_SCALE := 0.25
 const MAX_PROXY_SCALE := 4.0
@@ -58,6 +58,7 @@ func _build_proxy_robot() -> void:
 	body.name = "RobotPoseMarker"
 	body.mesh = body_mesh
 	body.material_override = body_material
+	body.position.y = 0.11
 	add_child(body)
 
 	var heading_mesh := BoxMesh.new()
@@ -619,9 +620,9 @@ func _sensor_material(_alpha := 1.0) -> StandardMaterial3D:
 
 
 func _configure_top_material(material: StandardMaterial3D) -> void:
-	material.no_depth_test = false
-	material.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_ALWAYS
-	material.render_priority = 20
+	material.no_depth_test = true
+	material.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	material.render_priority = 80
 
 
 func _color_for_link(link_name: String, filename: String) -> Color:
