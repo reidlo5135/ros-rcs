@@ -321,6 +321,10 @@ func clear_waypoints() -> void:
 		set_placing_enabled(false)
 
 
+func waypoint_count() -> int:
+	return waypoints.size()
+
+
 func _rebuild_waypoint_list() -> void:
 	if waypoint_list == null:
 		return

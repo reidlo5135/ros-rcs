@@ -19,6 +19,7 @@ var scene_viewport: Control
 var active_robot_id := "burger1"
 var telemetry_log_counts: Dictionary = {}
 var last_telemetry_log_msec := 0
+var ping_timer: Timer
 
 
 func _ready() -> void:
@@ -35,6 +36,12 @@ func _build_runtime() -> void:
 	transport.message_received.connect(_on_mqtt_message_received)
 	transport.publish_failed.connect(_on_publish_failed)
 	add_child(transport)
+
+	ping_timer = Timer.new()
+	ping_timer.wait_time = 5.0
+	ping_timer.autostart = false
+	ping_timer.timeout.connect(_on_ping_timer_timeout)
+	add_child(ping_timer)
 
 	telemetry_router = RcsTelemetryRouterScript.new()
 	telemetry_router.fallback_robot_id = active_robot_id
@@ -76,6 +83,8 @@ func _build_layout() -> void:
 	ai_mission_panel = AIMissionPanelScene.instantiate()
 	ai_mission_panel.visible = false
 	ai_mission_panel.prompt_submitted.connect(_on_ai_prompt_submitted)
+	ai_mission_panel.connect_requested.connect(_on_connect_requested)
+	ai_mission_panel.disconnect_requested.connect(_on_disconnect_requested)
 	workspace.add_child(ai_mission_panel)
 
 	scene_shell = _build_scene_shell()
@@ -210,6 +219,40 @@ func _on_layer_visibility_changed(layer_id: String, enabled: bool) -> void:
 
 
 func _on_ai_prompt_submitted(message: String) -> void:
+	var parsed: Dictionary = RcsAiPromptParser.parse(message, active_robot_id)
+	if not parsed.is_empty() and str(parsed.get("kind", "")) == "navigation_pose":
+		var robot_id := str(parsed.get("robot_id", active_robot_id)).strip_edges()
+		if robot_id.is_empty():
+			robot_id = active_robot_id
+		var command: Dictionary = RcsCommandFactory.navigate_to_pose(
+			robot_id,
+			float(parsed.get("x", 0.0)),
+			float(parsed.get("y", 0.0)),
+			float(parsed.get("yaw", 0.0))
+		)
+		command["channel"] = "navigation/command"
+		var payload: Variant = command.get("payload", {})
+		if typeof(payload) == TYPE_DICTIONARY:
+			var payload_dict: Dictionary = payload
+			var goal_poses_value: Variant = payload_dict.get("goal_poses", [])
+			if typeof(goal_poses_value) == TYPE_ARRAY and not (goal_poses_value as Array).is_empty():
+				var goal_poses: Array = goal_poses_value
+				var first_pose_value: Variant = goal_poses[0]
+				if typeof(first_pose_value) == TYPE_DICTIONARY:
+					var first_pose: Dictionary = first_pose_value
+					var frame := str(parsed.get("frame", "map")).strip_edges()
+					first_pose["frame"] = frame if not frame.is_empty() else "map"
+					goal_poses[0] = first_pose
+					payload_dict["goal_poses"] = goal_poses
+					command["payload"] = payload_dict
+		if ai_mission_panel != null and ai_mission_panel.has_method("begin_navigation_session"):
+			var request_id := ""
+			if typeof(payload) == TYPE_DICTIONARY:
+				request_id = str((payload as Dictionary).get("request_id", "")).strip_edges()
+			ai_mission_panel.begin_navigation_session(robot_id, request_id)
+		_on_command_requested(command)
+		AppState.push_event("AI prompt handled locally as navigation command")
+		return
 	AppState.push_event("AI prompt queued: " + message)
 
 
@@ -218,11 +261,20 @@ func _on_transport_connected() -> void:
 	AppState.push_event("MQTT connected")
 	var topics: PackedStringArray = TopicCatalogScript.build_all_runtime_subscriptions(active_robot_id)
 	transport.subscribe(topics)
+	CommandBus.request_system_ping()
+	if ping_timer != null:
+		ping_timer.start()
 
 
 func _on_transport_disconnected(reason: String) -> void:
 	AppState.set_connection_state("Disconnected")
 	AppState.push_event("MQTT disconnected: " + reason)
+	if ping_timer != null:
+		ping_timer.stop()
+
+
+func _on_ping_timer_timeout() -> void:
+	CommandBus.request_system_ping()
 
 
 func _on_transport_subscribed(topic_count: int) -> void:
@@ -242,6 +294,10 @@ func _on_mqtt_message_received(topic: String, payload: Variant) -> void:
 
 func _on_telemetry_patch(robot_id: String, patch: Dictionary) -> void:
 	SessionRegistry.apply_telemetry_patch(robot_id, patch)
+	if patch.has("navigation_feedback") and ai_mission_panel != null and ai_mission_panel.has_method("note_navigation_feedback"):
+		var feedback_value: Variant = patch.get("navigation_feedback", {})
+		if typeof(feedback_value) == TYPE_DICTIONARY:
+			ai_mission_panel.note_navigation_feedback(robot_id, feedback_value as Dictionary)
 	if patch.has("urdf_model"):
 		_push_urdf_event(robot_id, patch["urdf_model"])
 	_record_telemetry_log(robot_id, patch)
@@ -255,6 +311,13 @@ func _on_control_event(robot_id: String, domain: String, channel: String, payloa
 	var label := "%s/%s" % [domain, channel]
 	if typeof(payload) == TYPE_DICTIONARY:
 		var data: Dictionary = payload
+		if ai_mission_panel != null:
+			if domain == "navigation" and channel == "status" and ai_mission_panel.has_method("add_navigation_status_event"):
+				ai_mission_panel.add_navigation_status_event(robot_id, data)
+			elif domain == "navigation" and channel == "result" and ai_mission_panel.has_method("add_navigation_result_event"):
+				ai_mission_panel.add_navigation_result_event(robot_id, data)
+		if domain == "navigation" and channel == "result":
+			_handle_navigation_result_completion(robot_id, data)
 		var message := str(data.get("message", ""))
 		var request_id := str(data.get("request_id", ""))
 		var success_text := ""
@@ -268,6 +331,26 @@ func _on_control_event(robot_id: String, domain: String, channel: String, payloa
 			AppState.push_event("[%s] %s" % [robot_id, label])
 		return
 	AppState.push_event("[%s] %s" % [robot_id, label])
+
+
+func _handle_navigation_result_completion(robot_id: String, payload: Dictionary) -> void:
+	if not bool(payload.get("completed", false)) or not bool(payload.get("success", false)):
+		return
+	var queued_goals := 0
+	if operations_panel != null and operations_panel.has_method("waypoint_count"):
+		queued_goals = int(operations_panel.waypoint_count())
+	if queued_goals <= 0:
+		return
+	var completed_goals := int(payload.get("completed_goals", 0))
+	if completed_goals <= 0 and queued_goals == 1:
+		completed_goals = 1
+	if completed_goals < queued_goals:
+		return
+	if scene_viewport != null and scene_viewport.has_method("clear_waypoints"):
+		scene_viewport.clear_waypoints()
+	if operations_panel != null and operations_panel.has_method("clear_waypoints"):
+		operations_panel.clear_waypoints()
+	AppState.push_event("[%s] route completed; cleared %d waypoint(s)" % [robot_id, queued_goals])
 
 
 func _control_patch_for(domain: String, channel: String, payload: Variant) -> Dictionary:
