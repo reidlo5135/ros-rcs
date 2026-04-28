@@ -137,3 +137,4 @@ The immediate target is feature parity with the previous RCS MQTT behavior, not 
 4. Rewrite the recommended prompts in Korean and improve their content.
 5. Fix the issue where TF frames such as `map -> odom` and `odom -> base_footprint` appear only briefly on first load and then disappear.
 6. Improve the overall UI design including fonts and color palette.
+7. List and prioritize C++ migration targets for performance-sensitive paths such as occupancy/costmap texture generation, TF transform resolution, LaserScan/path point generation, URDF mesh/path resolution, and hot MQTT codec/parsing paths.
