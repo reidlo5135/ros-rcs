@@ -128,3 +128,12 @@ The immediate target is feature parity with the previous RCS MQTT behavior, not 
 3. Replace URDF proxy boxes with resolved `.dae`/`.stl` robot meshes.
 4. Add parse failure counters and payload diagnostics.
 5. Add command response/result handling.
+
+# 2026-04-29
+
+1. Reduce `system ping` publish interval to 1 second and fix the missing ping value in the UI.
+2. Improve AI panel chat UI/UX.
+3. Change AI chat command publishing to go to `MCP_SERVER` over WebSocket.
+4. Rewrite the recommended prompts in Korean and improve their content.
+5. Fix the issue where TF frames such as `map -> odom` and `odom -> base_footprint` appear only briefly on first load and then disappear.
+6. Improve the overall UI design including fonts and color palette.
