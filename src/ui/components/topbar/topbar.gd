@@ -1,6 +1,5 @@
 extends PanelContainer
 
-const APP_VERSION := "0.2.0"
 const TOPBAR_BG := Color(0.09, 0.098, 0.114)
 const CHIP_BG := Color(0.067, 0.075, 0.094)
 const LINE_STRONG := Color(0.2, 0.23, 0.28)
@@ -176,7 +175,7 @@ func _build_ui() -> void:
 	row.add_child(ping_widget)
 	battery_widget = BatteryWidget.new()
 	row.add_child(battery_widget)
-	row.add_child(_chip("v" + APP_VERSION, 52))
+	row.add_child(_chip("v" + AppState.app_version(), 52))
 
 
 func _mode_button(label_text: String, mode: String, group: ButtonGroup) -> Button:

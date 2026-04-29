@@ -6,6 +6,7 @@ signal topic_settings_changed(group: String)
 
 var connection_state := "Booting"
 var active_robot_id := "burger1"
+var runtime_config: Dictionary = {}
 var events: Array[Dictionary] = []
 var max_events := 160
 var topic_settings := {
@@ -13,10 +14,12 @@ var topic_settings := {
 	"viz": {},
 }
 
+const DEFAULT_RUNTIME_CONFIG_PATH := "res://project/config/default_runtime.json"
 const TOPIC_SETTINGS_PATH := "user://topic_settings.json"
 
 
 func _ready() -> void:
+	_load_runtime_config()
 	_load_topic_settings()
 
 
@@ -66,6 +69,55 @@ func set_topic_settings(group: String, next_values: Dictionary) -> void:
 func topic_settings_for(group: String) -> Dictionary:
 	var group_settings: Dictionary = topic_settings.get(group, {})
 	return group_settings.duplicate(true)
+
+
+func app_version() -> String:
+	return str(runtime_config.get("version", ProjectSettings.get_setting("application/config/version", "0.0.0")))
+
+
+func default_broker_url() -> String:
+	var transport: Dictionary = runtime_config.get("transport", {})
+	return str(transport.get("broker_url", "ws://192.168.61.35:9001/mqtt"))
+
+
+func default_robot_id() -> String:
+	var session: Dictionary = runtime_config.get("session", {})
+	return str(session.get("default_robot_id", "burger1"))
+
+
+func ai_prompt_config() -> Dictionary:
+	var ai: Dictionary = runtime_config.get("ai", {})
+	return ai.duplicate(true)
+
+
+func _load_runtime_config() -> void:
+	runtime_config = {}
+	if not FileAccess.file_exists(DEFAULT_RUNTIME_CONFIG_PATH):
+		_apply_runtime_defaults()
+		return
+	var file := FileAccess.open(DEFAULT_RUNTIME_CONFIG_PATH, FileAccess.READ)
+	if file == null:
+		_apply_runtime_defaults()
+		return
+	var json := JSON.new()
+	if json.parse(file.get_as_text()) != OK:
+		_apply_runtime_defaults()
+		return
+	if typeof(json.data) == TYPE_DICTIONARY:
+		runtime_config = (json.data as Dictionary).duplicate(true)
+	_apply_runtime_defaults()
+
+
+func _apply_runtime_defaults() -> void:
+	if not runtime_config.has("version"):
+		runtime_config["version"] = str(ProjectSettings.get_setting("application/config/version", "0.0.0"))
+	if typeof(runtime_config.get("transport", {})) != TYPE_DICTIONARY:
+		runtime_config["transport"] = {}
+	if typeof(runtime_config.get("session", {})) != TYPE_DICTIONARY:
+		runtime_config["session"] = {}
+	if typeof(runtime_config.get("ai", {})) != TYPE_DICTIONARY:
+		runtime_config["ai"] = {}
+	active_robot_id = default_robot_id()
 
 
 func _load_topic_settings() -> void:

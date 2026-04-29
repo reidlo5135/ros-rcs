@@ -1,6 +1,5 @@
 extends PanelContainer
 
-const PROMPT_CONFIG_PATH := "res://assets/ai/prompt.json"
 const DEFAULT_PROMPT_SECTION_LABEL := "추천 AI Prompt"
 const DEFAULT_PROMPTS := [
 	"현재 활성 로봇의 상태를 한눈에 요약해 줘. 연결 상태, 배터리, 경로 진행 상황, 장애물 징후를 같이 알려줘.",
@@ -83,6 +82,7 @@ var ws_connected := false
 
 func _ready() -> void:
 	mqtt_robot_id = AppState.active_robot_id
+	mqtt_broker_url = AppState.default_broker_url()
 	_build_ui()
 	AppState.connection_state_changed.connect(_on_transport_state_changed)
 	SessionRegistry.active_session_changed.connect(_on_active_session_changed)
@@ -449,17 +449,7 @@ func _load_prompt_config() -> Dictionary:
 		"prompt_section_label": DEFAULT_PROMPT_SECTION_LABEL,
 		"prompts": DEFAULT_PROMPTS.duplicate(),
 	}
-	if not FileAccess.file_exists(PROMPT_CONFIG_PATH):
-		return fallback
-	var file := FileAccess.open(PROMPT_CONFIG_PATH, FileAccess.READ)
-	if file == null:
-		return fallback
-	var json := JSON.new()
-	if json.parse(file.get_as_text()) != OK:
-		return fallback
-	if typeof(json.data) != TYPE_DICTIONARY:
-		return fallback
-	var data: Dictionary = json.data
+	var data: Dictionary = AppState.ai_prompt_config()
 	var prompt_config := fallback.duplicate(true)
 	var section_label := str(data.get("prompt_section_label", "")).strip_edges()
 	if not section_label.is_empty():

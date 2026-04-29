@@ -23,6 +23,7 @@ var ping_timer: Timer
 
 
 func _ready() -> void:
+	active_robot_id = AppState.default_robot_id()
 	_build_runtime()
 	_build_layout()
 	AppState.topic_settings_changed.connect(_on_topic_settings_changed)
@@ -170,7 +171,7 @@ func _on_control_mode_changed(mode: String) -> void:
 func _on_connect_requested(broker_url: String, robot_id: String) -> void:
 	active_robot_id = robot_id.strip_edges()
 	if active_robot_id.is_empty():
-		active_robot_id = "burger1"
+		active_robot_id = AppState.default_robot_id()
 	telemetry_router.fallback_robot_id = active_robot_id
 	SessionRegistry.set_active_robot(active_robot_id)
 

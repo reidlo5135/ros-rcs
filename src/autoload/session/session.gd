@@ -11,7 +11,8 @@ var active_session_id := "robot:burger1"
 
 
 func _ready() -> void:
-	register_robot("burger1")
+	var default_robot_id := AppState.default_robot_id()
+	active_session_id = register_robot(default_robot_id)
 
 
 func register_robot(robot_id: String) -> String:

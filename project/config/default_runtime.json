@@ -9,6 +9,14 @@
     "default_robot_id": "burger1",
     "target_kind": "robot"
   },
+  "ai": {
+    "prompt_section_label": "추천 Prompt",
+    "prompts": [
+      "burger1을 map 기준 x=3.00, y=0.00으로 보내줘.",
+      "burger1 초기 위치를 map 기준 x=0.00, y=0.00, yaw=0.00으로 설정해줘.",
+      "현재 경로가 막혔을 때 원인과 복구 절차를 우선순위로 제안해줘."
+    ]
+  },
   "visualization": {
     "enabled_layers": [
       "grid",

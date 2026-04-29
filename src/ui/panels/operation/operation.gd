@@ -141,7 +141,7 @@ func _build_ui() -> void:
 	_add_field_label(column, "Broker WS")
 
 	broker_input = LineEdit.new()
-	broker_input.text = "ws://192.168.61.35:9001/mqtt"
+	broker_input.text = AppState.default_broker_url()
 	broker_input.placeholder_text = "ws://broker:9001/mqtt"
 	broker_input.add_theme_stylebox_override("normal", _input_style())
 	column.add_child(broker_input)
@@ -150,7 +150,7 @@ func _build_ui() -> void:
 
 	robot_id_input = LineEdit.new()
 	robot_id_input.text = AppState.active_robot_id
-	robot_id_input.placeholder_text = "burger1"
+	robot_id_input.placeholder_text = AppState.default_robot_id()
 	robot_id_input.add_theme_stylebox_override("normal", _input_style())
 	column.add_child(robot_id_input)
 
@@ -349,9 +349,9 @@ func _selected_or_last_waypoint() -> Dictionary:
 
 func _selected_robot_id() -> String:
 	if robot_id_input == null:
-		return "burger1"
+		return AppState.default_robot_id()
 	var robot_id := robot_id_input.text.strip_edges()
-	return robot_id if not robot_id.is_empty() else "burger1"
+	return robot_id if not robot_id.is_empty() else AppState.default_robot_id()
 
 
 func _separator() -> HSeparator:
