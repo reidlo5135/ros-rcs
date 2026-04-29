@@ -366,12 +366,12 @@ func _on_telemetry_updated(session_id: String, _patch: Dictionary) -> void:
 	var state: Variant = session.get("state")
 	if state == null:
 		return
-	var battery: Variant = state.get("battery_state")
+	var battery: Variant = state.battery_state
 	if typeof(battery) == TYPE_DICTIONARY and not (battery as Dictionary).is_empty():
 		var pct := float((battery as Dictionary).get("percentage", -1.0))
 		if pct >= 0.0 and battery_widget != null:
 			battery_widget.update(pct if pct <= 1.0 else pct / 100.0)
-	var sys_result: Variant = state.get("system_result")
+	var sys_result: Variant = state.system_result
 	if typeof(sys_result) == TYPE_DICTIONARY and ping_widget != null:
 		var ping := _extract_ping_from(sys_result as Dictionary)
 		if ping >= 0.0:

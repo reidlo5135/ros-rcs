@@ -40,12 +40,19 @@ static func _robot_id_from(text: String, fallback_robot_id: String) -> String:
 	var clean_fallback := fallback_robot_id.strip_edges()
 	if clean_fallback.is_empty():
 		clean_fallback = "burger1"
+	if Engine.has_singleton("SessionRegistry"):
+		var registry: Variant = Engine.get_singleton("SessionRegistry")
+		if registry != null and registry.has_method("robot_ids"):
+			for robot_id in registry.robot_ids():
+				var known_id := str(robot_id).strip_edges()
+				if not known_id.is_empty() and text.find(known_id) >= 0:
+					return known_id
 	var words := text.strip_edges().split(" ", false)
-	if words.size() < 2:
+	if words.is_empty():
 		return clean_fallback
-	var candidate := str(words[1]).strip_edges().trim_suffix(",").trim_suffix(".")
+	var candidate := str(words[0]).strip_edges().trim_suffix(",").trim_suffix(".")
 	var lowered := candidate.to_lower()
-	if lowered in ["to", "goal", "x", "y", "yaw", "in"]:
+	if lowered in ["to", "goal", "go", "send", "x", "y", "yaw", "in", "map", "initial", "cancel"]:
 		return clean_fallback
 	return candidate if not candidate.is_empty() else clean_fallback
 

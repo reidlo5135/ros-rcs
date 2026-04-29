@@ -154,6 +154,21 @@ static func build_all_runtime_subscriptions(robot_id: String) -> PackedStringArr
 	return topics
 
 
+static func build_all_runtime_subscriptions_for_robot_ids(robot_ids: Array) -> PackedStringArray:
+	var topics := PackedStringArray()
+	var seen := {}
+	for robot_id_value in robot_ids:
+		var robot_id := str(robot_id_value).strip_edges()
+		if robot_id.is_empty():
+			continue
+		for topic in build_all_runtime_subscriptions(robot_id):
+			_add_unique(topics, seen, topic)
+	if topics.is_empty():
+		for topic in build_all_runtime_subscriptions("burger1"):
+			_add_unique(topics, seen, topic)
+	return topics
+
+
 static func command_topic(command_key: String, robot_id: String) -> String:
 	var topics := command_topics()
 	if not topics.has(command_key):

@@ -27,8 +27,11 @@ var global_costmap_layer: Node3D
 var local_costmap_layer: Node3D
 var global_path_layer: MeshInstance3D
 var local_path_layer: MeshInstance3D
-var robot_layer: Node3D
-var tf_layer: Node3D
+var robot_group_root: Node3D
+var tf_group_root: Node3D
+var robot_layers: Dictionary = {}
+var tf_layers: Dictionary = {}
+var active_tf_layer: Node3D
 var scan_layer: Node3D
 var camera_target := Vector3.ZERO
 var camera_yaw := 0.0
@@ -151,17 +154,16 @@ func _build_layers() -> void:
 	local_path_layer = _build_path_layer("LocalPathLayer")
 	add_child(local_path_layer)
 
-	robot_layer = RobotLayerScript.new()
-	robot_layer.name = "RobotLayer"
-	add_child(robot_layer)
+	robot_group_root = Node3D.new()
+	robot_group_root.name = "RobotGroupLayer"
+	add_child(robot_group_root)
 
-	tf_layer = TfLayerScript.new()
-	tf_layer.name = "TfLayer"
-	add_child(tf_layer)
+	tf_group_root = Node3D.new()
+	tf_group_root.name = "TfGroupLayer"
+	add_child(tf_group_root)
 
 	scan_layer = ScanLayerScript.new()
 	scan_layer.name = "ScanLayer"
-	scan_layer.tf_provider = tf_layer
 	add_child(scan_layer)
 
 
@@ -185,6 +187,7 @@ func _build_path_layer(name: String) -> MeshInstance3D:
 
 
 func _on_telemetry_updated(session_id: String, patch: Dictionary) -> void:
+	_apply_robot_session_state(session_id)
 	if session_id != SessionRegistry.active_session_id:
 		return
 	_apply_patch_state(patch)
@@ -197,6 +200,7 @@ func _on_active_session_changed(_session_id: String) -> void:
 func _apply_active_state() -> void:
 	if not SessionRegistry.sessions.has(SessionRegistry.active_session_id):
 		return
+	_apply_all_robot_session_states()
 	var session := SessionRegistry.sessions[SessionRegistry.active_session_id] as Dictionary
 	var state: Variant = session.get("state")
 	if state == null:
@@ -209,12 +213,10 @@ func _apply_active_state() -> void:
 		local_costmap_layer.apply_state(state)
 	_apply_path_layer(global_path_layer, state.global_path, Color(0.13, 0.85, 1.0), WAYPOINT_Y_OFFSET + 0.015)
 	_apply_path_layer(local_path_layer, state.local_path, Color(0.57, 0.87, 0.12), WAYPOINT_Y_OFFSET + 0.025)
-	if robot_layer != null and robot_layer.has_method("apply_state"):
-		robot_layer.apply_state(state)
-		_update_robot_camera_reference(state.robot_pose)
-	if tf_layer != null and tf_layer.has_method("apply_state"):
-		tf_layer.apply_state(state)
+	_update_robot_camera_reference(state.robot_pose)
+	active_tf_layer = _ensure_tf_layer(str(session.get("id", "")))
 	if scan_layer != null and scan_layer.has_method("apply_state"):
+		scan_layer.tf_provider = active_tf_layer
 		scan_layer.apply_state(state)
 	_update_camera()
 
@@ -236,15 +238,93 @@ func _apply_patch_state(patch: Dictionary) -> void:
 		_apply_path_layer(global_path_layer, state.global_path, Color(0.13, 0.85, 1.0), WAYPOINT_Y_OFFSET + 0.015)
 	if patch.has("local_path"):
 		_apply_path_layer(local_path_layer, state.local_path, Color(0.57, 0.87, 0.12), WAYPOINT_Y_OFFSET + 0.025)
-	if _patch_touches_robot(patch) and robot_layer != null and robot_layer.has_method("apply_state"):
-		robot_layer.apply_state(state)
+	if _patch_touches_robot(patch):
+		_apply_robot_session_state(SessionRegistry.active_session_id)
 		_update_robot_camera_reference(state.robot_pose)
-	if _patch_touches_tf(patch) and tf_layer != null and tf_layer.has_method("apply_state"):
-		tf_layer.apply_state(state)
+	if _patch_touches_tf(patch):
+		_apply_robot_session_state(SessionRegistry.active_session_id)
+		active_tf_layer = _ensure_tf_layer(str(session.get("id", "")))
 	if _patch_touches_scan(patch) and scan_layer != null and scan_layer.has_method("apply_state"):
+		scan_layer.tf_provider = active_tf_layer
 		scan_layer.apply_state(state)
 	if _patch_touches_robot(patch):
 		_update_camera()
+
+
+func _apply_all_robot_session_states() -> void:
+	for session_id in SessionRegistry.sessions.keys():
+		_apply_robot_session_state(str(session_id))
+
+
+func _apply_robot_session_state(session_id: String) -> void:
+	if not SessionRegistry.sessions.has(session_id):
+		return
+	var session := SessionRegistry.sessions[session_id] as Dictionary
+	var robot_id := str(session.get("id", "")).strip_edges()
+	if robot_id.is_empty():
+		return
+	var state: Variant = session.get("state")
+	if state == null:
+		return
+	if _state_has_robot_visual(state):
+		var layer := _ensure_robot_layer(robot_id)
+		if layer != null and layer.has_method("apply_state"):
+			layer.apply_state(state)
+	if _state_has_tf_visual(state):
+		var tf_layer_for_robot := _ensure_tf_layer(robot_id)
+		if tf_layer_for_robot != null and tf_layer_for_robot.has_method("apply_state"):
+			tf_layer_for_robot.apply_state(state)
+
+
+func _ensure_robot_layer(robot_id: String) -> Node3D:
+	var clean_id := robot_id.strip_edges()
+	if clean_id.is_empty():
+		clean_id = "robot"
+	if robot_layers.has(clean_id):
+		return robot_layers[clean_id] as Node3D
+	if robot_group_root == null:
+		return null
+	var layer := RobotLayerScript.new() as Node3D
+	layer.name = "Robot_%s" % _safe_layer_name(clean_id)
+	robot_group_root.add_child(layer)
+	robot_layers[clean_id] = layer
+	return layer
+
+
+func _ensure_tf_layer(robot_id: String) -> Node3D:
+	var clean_id := robot_id.strip_edges()
+	if clean_id.is_empty():
+		clean_id = "robot"
+	if tf_layers.has(clean_id):
+		return tf_layers[clean_id] as Node3D
+	if tf_group_root == null:
+		return null
+	var layer := TfLayerScript.new() as Node3D
+	layer.name = "TF_%s" % _safe_layer_name(clean_id)
+	tf_group_root.add_child(layer)
+	tf_layers[clean_id] = layer
+	return layer
+
+
+func _safe_layer_name(value: String) -> String:
+	var clean := value.replace("/", "_").replace(":", "_").replace(" ", "_")
+	return clean if not clean.is_empty() else "robot"
+
+
+func _state_has_robot_visual(state: Variant) -> bool:
+	if state == null:
+		return false
+	var robot_pose: Variant = state.robot_pose
+	return typeof(robot_pose) == TYPE_DICTIONARY and not (robot_pose as Dictionary).is_empty()
+
+
+func _state_has_tf_visual(state: Variant) -> bool:
+	if state == null:
+		return false
+	for value in [state.tf, state.tf_static, state.robot_pose, state.urdf_model]:
+		if typeof(value) == TYPE_DICTIONARY and not (value as Dictionary).is_empty():
+			return true
+	return false
 
 
 func _patch_touches_robot(patch: Dictionary) -> bool:
@@ -362,11 +442,11 @@ func set_visualization_layer_visible(layer_id: String, enabled: bool) -> void:
 			if local_costmap_layer != null:
 				local_costmap_layer.visible = enabled
 		"robot", "exact_footprint":
-			if robot_layer != null:
-				robot_layer.visible = enabled
+			if robot_group_root != null:
+				robot_group_root.visible = enabled
 		"tf":
-			if tf_layer != null:
-				tf_layer.visible = enabled
+			if tf_group_root != null:
+				tf_group_root.visible = enabled
 		"scan":
 			if scan_layer != null:
 				scan_layer.visible = enabled

@@ -3,6 +3,7 @@ extends Node
 signal connection_state_changed(next_state: String)
 signal event_pushed(entry: Dictionary)
 signal topic_settings_changed(group: String)
+signal active_robot_changed(robot_id: String)
 
 var connection_state := "Booting"
 var active_robot_id := "burger1"
@@ -34,6 +35,7 @@ func set_active_robot(robot_id: String) -> void:
 	active_robot_id = robot_id.strip_edges()
 	if active_robot_id.is_empty():
 		active_robot_id = "burger1"
+	active_robot_changed.emit(active_robot_id)
 	push_event("Active robot: " + active_robot_id)
 
 
@@ -83,6 +85,24 @@ func default_broker_url() -> String:
 func default_robot_id() -> String:
 	var session: Dictionary = runtime_config.get("session", {})
 	return str(session.get("default_robot_id", "burger1"))
+
+
+func default_robot_ids() -> PackedStringArray:
+	var session: Dictionary = runtime_config.get("session", {})
+	var values: Variant = session.get("default_robot_ids", [default_robot_id()])
+	var result := PackedStringArray()
+	if typeof(values) == TYPE_ARRAY:
+		for value in values:
+			var robot_id := str(value).strip_edges()
+			if not robot_id.is_empty() and not result.has(robot_id):
+				result.append(robot_id)
+	else:
+		var single := str(values).strip_edges()
+		if not single.is_empty():
+			result.append(single)
+	if result.is_empty():
+		result.append(default_robot_id())
+	return result
 
 
 func ai_prompt_config() -> Dictionary:

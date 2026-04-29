@@ -47,7 +47,7 @@ class GearButton:
 
 
 signal prompt_submitted(message: String, submission: Dictionary)
-signal connect_requested(broker_url: String, robot_id: String)
+signal connect_requested(broker_url: String, robot_ids_text: String)
 signal disconnect_requested()
 signal canvas_pick_mode_changed(mode: String)
 signal preview_requested(preview: Dictionary)
@@ -69,6 +69,8 @@ var _panel_gradient_top: Color = Color.TRANSPARENT
 var last_navigation_status_keys: Dictionary = {}
 var last_navigation_result_keys: Dictionary = {}
 var navigation_sessions: Dictionary = {}
+var prompt_buttons: Array[Button] = []
+var prompt_button_templates: Dictionary = {}
 var map_tool_buttons: Dictionary = {}
 var current_canvas_pick_mode := ""
 var drafted_preview_goals: Array[Dictionary] = []
@@ -514,16 +516,18 @@ func _apply_provider_button_state(button: Button, active: bool) -> void:
 
 func _prompt_button(text: String) -> Button:
 	var button := Button.new()
-	button.text = text
+	button.text = _resolve_prompt_template(text)
 	button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	button.custom_minimum_size = Vector2(0, 40)
 	button.add_theme_stylebox_override("normal", _button_style(Color(0.075, 0.09, 0.11), Color(0.18, 0.22, 0.28)))
 	button.add_theme_stylebox_override("hover", _button_style(Color(0.09, 0.11, 0.14), Color(0.26, 0.32, 0.4)))
 	button.add_theme_color_override("font_color", Color(0.86, 0.92, 1.0))
 	button.pressed.connect(func() -> void:
-		input.text = text
+		input.text = _resolve_prompt_template(text)
 		input.grab_focus()
 	)
+	prompt_buttons.append(button)
+	prompt_button_templates[button] = text
 	return button
 
 
@@ -550,6 +554,21 @@ func _load_prompt_config() -> Dictionary:
 		if not cleaned_prompts.is_empty():
 			prompt_config["prompts"] = cleaned_prompts
 	return prompt_config
+
+
+func _resolve_prompt_template(template: String) -> String:
+	var robot_id := AppState.active_robot_id.strip_edges()
+	if robot_id.is_empty():
+		robot_id = AppState.default_robot_id()
+	return template.replace("{robot_id}", robot_id).replace("burger1", robot_id)
+
+
+func _refresh_prompt_buttons() -> void:
+	for button in prompt_buttons:
+		if button == null:
+			continue
+		var template := str(prompt_button_templates.get(button, button.text))
+		button.text = _resolve_prompt_template(template)
 
 
 func apply_canvas_pick(mode: String, position: Vector3, yaw: float) -> void:
@@ -1380,11 +1399,11 @@ func _open_connection_settings() -> void:
 	mqtt_broker_input.add_theme_color_override("font_color", Color(0.82, 0.88, 0.96))
 	body.add_child(mqtt_broker_input)
 
-	_add_modal_field_label(body, "Robot ID")
+	_add_modal_field_label(body, "Robot IDs")
 
 	mqtt_robot_id_input = LineEdit.new()
 	mqtt_robot_id_input.text = mqtt_robot_id if not mqtt_robot_id.is_empty() else AppState.active_robot_id
-	mqtt_robot_id_input.placeholder_text = "burger1"
+	mqtt_robot_id_input.placeholder_text = "burger1, burger2"
 	mqtt_robot_id_input.custom_minimum_size = Vector2(528, 30)
 	mqtt_robot_id_input.add_theme_stylebox_override("normal", _input_style())
 	mqtt_robot_id_input.add_theme_color_override("font_color", Color(0.82, 0.88, 0.96))
@@ -1644,11 +1663,11 @@ func _open_connection_settings_dialog() -> void:
 	mqtt_broker_input.add_theme_color_override("font_color", Color(0.9, 0.94, 0.95))
 	body.add_child(mqtt_broker_input)
 
-	_add_modal_field_label(body, "Robot ID")
+	_add_modal_field_label(body, "Robot IDs")
 
 	mqtt_robot_id_input = LineEdit.new()
 	mqtt_robot_id_input.text = mqtt_robot_id if not mqtt_robot_id.is_empty() else AppState.active_robot_id
-	mqtt_robot_id_input.placeholder_text = "burger1"
+	mqtt_robot_id_input.placeholder_text = "burger1, burger2"
 	mqtt_robot_id_input.custom_minimum_size = Vector2(528, 30)
 	mqtt_robot_id_input.add_theme_stylebox_override("normal", _input_style())
 	mqtt_robot_id_input.add_theme_color_override("font_color", Color(0.9, 0.94, 0.95))
@@ -1763,4 +1782,5 @@ func _on_transport_state_changed(_next_state: String) -> void:
 
 
 func _on_active_session_changed(_session_id: String) -> void:
+	_refresh_prompt_buttons()
 	_refresh_context_labels()

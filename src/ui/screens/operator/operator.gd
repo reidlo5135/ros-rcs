@@ -17,6 +17,7 @@ var telemetry_panel: Control
 var scene_shell: Control
 var scene_viewport: Control
 var active_robot_id := "burger1"
+var connected_robot_ids: Array[String] = []
 var telemetry_log_counts: Dictionary = {}
 var last_telemetry_log_msec := 0
 var ping_timer: Timer
@@ -24,6 +25,7 @@ var ping_timer: Timer
 
 func _ready() -> void:
 	active_robot_id = AppState.default_robot_id()
+	connected_robot_ids = _clean_robot_ids(Array(AppState.default_robot_ids()))
 	_build_runtime()
 	_build_layout()
 	AppState.topic_settings_changed.connect(_on_topic_settings_changed)
@@ -79,6 +81,7 @@ func _build_layout() -> void:
 	operations_panel.initial_pose_requested.connect(_on_initial_pose_requested)
 	operations_panel.waypoint_placing_toggled.connect(_on_waypoint_placing_toggled)
 	operations_panel.layer_visibility_changed.connect(_on_layer_visibility_changed)
+	operations_panel.robot_selected.connect(_on_robot_selected)
 	workspace.add_child(operations_panel)
 
 	ai_mission_panel = AIMissionPanelScene.instantiate()
@@ -180,16 +183,30 @@ func _on_control_mode_changed(mode: String) -> void:
 			scene_viewport.clear_ai_preview()
 
 
-func _on_connect_requested(broker_url: String, robot_id: String) -> void:
-	active_robot_id = robot_id.strip_edges()
-	if active_robot_id.is_empty():
-		active_robot_id = AppState.default_robot_id()
+func _on_connect_requested(broker_url: String, robot_ids_text: String) -> void:
+	var requested_robot_ids := _parse_robot_ids(robot_ids_text)
+	var clean_broker_url := broker_url.strip_edges()
+	var is_same_broker: bool = transport != null and transport.connected_state and transport.broker_url.strip_edges() == clean_broker_url
+	connected_robot_ids = _merge_robot_ids(connected_robot_ids, requested_robot_ids) if is_same_broker else requested_robot_ids
+	active_robot_id = requested_robot_ids[0] if not requested_robot_ids.is_empty() else active_robot_id
+	if active_robot_id.is_empty() or not connected_robot_ids.has(active_robot_id):
+		active_robot_id = connected_robot_ids[0]
 	telemetry_router.fallback_robot_id = active_robot_id
+	for robot_id in connected_robot_ids:
+		SessionRegistry.register_robot(robot_id)
 	SessionRegistry.set_active_robot(active_robot_id)
+	if operations_panel != null and operations_panel.has_method("set_connected_robot_ids"):
+		operations_panel.set_connected_robot_ids(connected_robot_ids, active_robot_id)
 
-	transport.broker_url = broker_url.strip_edges()
+	transport.broker_url = clean_broker_url
+	if is_same_broker:
+		var topics: PackedStringArray = TopicCatalogScript.build_all_runtime_subscriptions_for_robot_ids(connected_robot_ids)
+		transport.subscribe(topics)
+		AppState.push_event("Added robots on %s: [%s]" % [transport.broker_url, ", ".join(requested_robot_ids)])
+		return
+
 	AppState.set_connection_state("Connecting")
-	AppState.push_event("Connecting: %s [%s]" % [transport.broker_url, active_robot_id])
+	AppState.push_event("Connecting: %s [%s]" % [transport.broker_url, ", ".join(connected_robot_ids)])
 	transport.connect_transport()
 
 
@@ -224,6 +241,18 @@ func _on_waypoint_placing_toggled(enabled: bool) -> void:
 func _on_waypoint_placed(world_position: Vector3, yaw: float) -> void:
 	if operations_panel != null and operations_panel.has_method("add_waypoint"):
 		operations_panel.add_waypoint(Vector3(world_position.x, 0.0, -world_position.z), yaw)
+
+
+func _on_robot_selected(robot_id: String) -> void:
+	var clean_id := robot_id.strip_edges()
+	if clean_id.is_empty():
+		return
+	active_robot_id = clean_id
+	telemetry_router.fallback_robot_id = active_robot_id
+	SessionRegistry.set_active_robot(active_robot_id)
+	if transport != null and transport.connected_state:
+		var topics: PackedStringArray = TopicCatalogScript.build_all_runtime_subscriptions_for_robot_ids(connected_robot_ids)
+		transport.subscribe(topics)
 
 
 func _on_ai_canvas_pick_mode_changed(mode: String) -> void:
@@ -288,7 +317,7 @@ func _on_ai_prompt_submitted(message: String, submission: Dictionary) -> void:
 func _on_transport_connected() -> void:
 	AppState.set_connection_state("Connected")
 	AppState.push_event("MQTT connected")
-	var topics: PackedStringArray = TopicCatalogScript.build_all_runtime_subscriptions(active_robot_id)
+	var topics: PackedStringArray = TopicCatalogScript.build_all_runtime_subscriptions_for_robot_ids(connected_robot_ids)
 	transport.subscribe(topics)
 	CommandBus.request_system_ping()
 	if ping_timer != null:
@@ -313,7 +342,7 @@ func _on_transport_subscribed(topic_count: int) -> void:
 func _on_topic_settings_changed(group: String) -> void:
 	if group != "viz" or transport == null or not transport.connected_state:
 		return
-	var topics: PackedStringArray = TopicCatalogScript.build_all_runtime_subscriptions(active_robot_id)
+	var topics: PackedStringArray = TopicCatalogScript.build_all_runtime_subscriptions_for_robot_ids(connected_robot_ids)
 	transport.subscribe(topics)
 
 
@@ -597,6 +626,36 @@ func _summarize_prompt(message: String, max_length := 88) -> String:
 	if clean.length() <= max_length:
 		return clean
 	return clean.substr(0, max_length - 3) + "..."
+
+
+func _parse_robot_ids(text: String) -> Array[String]:
+	var raw_ids := text.replace(";", ",").replace("\n", ",").split(",", false)
+	var ids := _clean_robot_ids(raw_ids)
+	if ids.is_empty():
+		ids = _clean_robot_ids(Array(AppState.default_robot_ids()))
+	if ids.is_empty():
+		ids = [AppState.default_robot_id()]
+	return ids
+
+
+func _clean_robot_ids(values: Array) -> Array[String]:
+	var ids: Array[String] = []
+	for value in values:
+		var robot_id := str(value).strip_edges()
+		if not robot_id.is_empty() and not ids.has(robot_id):
+			ids.append(robot_id)
+	return ids
+
+
+func _merge_robot_ids(existing_ids: Array[String], requested_ids: Array[String]) -> Array[String]:
+	var merged: Array[String] = []
+	for robot_id in existing_ids:
+		if not robot_id.is_empty() and not merged.has(robot_id):
+			merged.append(robot_id)
+	for robot_id in requested_ids:
+		if not robot_id.is_empty() and not merged.has(robot_id):
+			merged.append(robot_id)
+	return merged
 
 
 func _push_urdf_event(robot_id: String, urdf_model: Variant) -> void:

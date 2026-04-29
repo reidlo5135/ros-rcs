@@ -216,11 +216,11 @@ func _sync_from_active_session() -> void:
 func _apply_runtime_state(state: Variant) -> void:
 	if state == null:
 		return
-	_apply_motion_status(state.motion_status if state.get("motion_status") != null else {})
-	_apply_navigation_feedback(state.navigation_feedback if state.get("navigation_feedback") != null else {})
-	_apply_navigation_status(state.navigation_status if state.get("navigation_status") != null else {})
-	_apply_navigation_result(state.navigation_result if state.get("navigation_result") != null else {})
-	_apply_system_result(state.system_result if state.get("system_result") != null else {})
+	_apply_motion_status(state.motion_status)
+	_apply_navigation_feedback(state.navigation_feedback)
+	_apply_navigation_status(state.navigation_status)
+	_apply_navigation_result(state.navigation_result)
+	_apply_system_result(state.system_result)
 
 
 func _apply_motion_status(payload: Dictionary) -> void:

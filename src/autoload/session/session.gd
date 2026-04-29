@@ -11,8 +11,10 @@ var active_session_id := "robot:burger1"
 
 
 func _ready() -> void:
-	var default_robot_id := AppState.default_robot_id()
-	active_session_id = register_robot(default_robot_id)
+	var default_robot_ids := AppState.default_robot_ids()
+	for robot_id in default_robot_ids:
+		register_robot(robot_id)
+	active_session_id = register_robot(default_robot_ids[0] if not default_robot_ids.is_empty() else AppState.default_robot_id())
 
 
 func register_robot(robot_id: String) -> String:
@@ -42,6 +44,17 @@ func set_active_session(session_id: String) -> void:
 
 func set_active_robot(robot_id: String) -> void:
 	set_active_session(register_robot(robot_id))
+
+
+func robot_ids() -> PackedStringArray:
+	var ids := PackedStringArray()
+	for session_id in sessions.keys():
+		var session := sessions[session_id] as Dictionary
+		var robot_id := str(session.get("id", "")).strip_edges()
+		if not robot_id.is_empty():
+			ids.append(robot_id)
+	ids.sort()
+	return ids
 
 
 func apply_telemetry_patch(robot_id: String, patch: Dictionary) -> void:

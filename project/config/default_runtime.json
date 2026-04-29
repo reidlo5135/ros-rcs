@@ -1,5 +1,5 @@
 {
-  "version": "0.2.6",
+  "version": "0.2.7",
   "transport": {
     "broker_url": "ws://192.168.61.35:9001/mqtt",
     "secure_required": false,
@@ -7,15 +7,16 @@
   },
   "session": {
     "default_robot_id": "burger1",
+    "default_robot_ids": ["burger1"],
     "target_kind": "robot"
   },
   "ai": {
     "prompt_section_label": "추천 Prompt",
     "prompts": [
-      "burger1을 map 기준 x=3.00, y=0.00으로 보내줘.",
-      "burger1 초기 위치를 map 기준 x=0.00, y=0.00, yaw=0.00으로 설정해줘.",
-      "burger1의 현재 주행 중인 Goal을 취소해줘.",
-      "현재 경로가 막혔을 때 원인과 복구 절차를 우선순위로 제안해줘."
+      "{robot_id}를 map 기준 x=3.00, y=0.00으로 보내줘.",
+      "{robot_id} 초기 위치를 map 기준 x=0.00, y=0.00, yaw=0.00으로 설정해줘.",
+      "{robot_id}의 현재 이동 목표를 취소해줘.",
+      "선택된 로봇의 현재 경로가 막혔을 때 원인과 복구 절차를 우선순위로 제안해줘."
     ]
   },
   "visualization": {

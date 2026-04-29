@@ -97,8 +97,9 @@ class GearButton:
 		draw_arc(center, 6.0, 0.0, TAU, 24, color, 1.5)
 		draw_circle(center, 2.3, color)
 
-signal connect_requested(broker_url: String, robot_id: String)
+signal connect_requested(broker_url: String, robot_ids_text: String)
 signal disconnect_requested()
+signal robot_selected(robot_id: String)
 signal navigation_requested(goals: Array)
 signal cancel_requested()
 signal clear_requested()
@@ -108,6 +109,7 @@ signal layer_visibility_changed(layer_id: String, enabled: bool)
 
 var broker_input: LineEdit
 var robot_id_input: LineEdit
+var robot_selector: OptionButton
 var placing_button: Button
 var waypoint_list: ItemList
 var waypoints: Array[Dictionary] = []
@@ -146,20 +148,30 @@ func _build_ui() -> void:
 	broker_input.add_theme_stylebox_override("normal", _input_style())
 	column.add_child(broker_input)
 
-	_add_field_label(column, "Robot ID")
+	_add_field_label(column, "Robot IDs")
 
 	robot_id_input = LineEdit.new()
-	robot_id_input.text = AppState.active_robot_id
-	robot_id_input.placeholder_text = AppState.default_robot_id()
+	robot_id_input.text = ", ".join(Array(AppState.default_robot_ids()))
+	robot_id_input.placeholder_text = "burger1, burger2"
 	robot_id_input.add_theme_stylebox_override("normal", _input_style())
 	column.add_child(robot_id_input)
+
+	_add_field_label(column, "Command Target")
+
+	robot_selector = OptionButton.new()
+	robot_selector.add_theme_stylebox_override("normal", _input_style())
+	robot_selector.item_selected.connect(func(_index: int) -> void:
+		robot_selected.emit(selected_robot_id())
+	)
+	column.add_child(robot_selector)
+	set_connected_robot_ids(Array(AppState.default_robot_ids()), AppState.active_robot_id)
 
 	var connection_row := HBoxContainer.new()
 	connection_row.add_theme_constant_override("separation", 6)
 	column.add_child(connection_row)
 
 	_add_button(connection_row, "Connect", Color(0.25, 0.29, 0.35), Color(0.82, 0.88, 0.96), func() -> void:
-		connect_requested.emit(broker_input.text, _selected_robot_id())
+		connect_requested.emit(broker_input.text, _selected_robot_ids_text())
 	)
 	_add_button(connection_row, "Disconnect", Color(0.04, 0.25, 0.28), Color(0.28, 0.96, 1.0), func() -> void:
 		disconnect_requested.emit()
@@ -348,11 +360,46 @@ func _selected_or_last_waypoint() -> Dictionary:
 	return waypoints[waypoints.size() - 1]
 
 
-func _selected_robot_id() -> String:
+func set_connected_robot_ids(robot_ids: Array, selected_robot_id := "") -> void:
+	if robot_selector == null:
+		return
+	var clean_ids := _clean_robot_ids(robot_ids)
+	if clean_ids.is_empty():
+		clean_ids = [AppState.default_robot_id()]
+	var target_id := selected_robot_id.strip_edges()
+	if target_id.is_empty() or not clean_ids.has(target_id):
+		target_id = str(clean_ids[0])
+
+	robot_selector.clear()
+	var selected_index := 0
+	for index in range(clean_ids.size()):
+		var robot_id := str(clean_ids[index])
+		robot_selector.add_item(robot_id)
+		if robot_id == target_id:
+			selected_index = index
+	robot_selector.select(selected_index)
+
+
+func selected_robot_id() -> String:
+	if robot_selector != null and robot_selector.item_count > 0:
+		return robot_selector.get_item_text(robot_selector.selected)
+	return AppState.active_robot_id if not AppState.active_robot_id.is_empty() else AppState.default_robot_id()
+
+
+func _selected_robot_ids_text() -> String:
 	if robot_id_input == null:
 		return AppState.default_robot_id()
-	var robot_id := robot_id_input.text.strip_edges()
-	return robot_id if not robot_id.is_empty() else AppState.default_robot_id()
+	var text := robot_id_input.text.strip_edges()
+	return text if not text.is_empty() else AppState.default_robot_id()
+
+
+func _clean_robot_ids(values: Array) -> Array[String]:
+	var result: Array[String] = []
+	for value in values:
+		var robot_id := str(value).strip_edges()
+		if not robot_id.is_empty() and not result.has(robot_id):
+			result.append(robot_id)
+	return result
 
 
 func _separator() -> HSeparator:
