@@ -1,7 +1,7 @@
 extends RefCounted
 class_name RcsRobotSession
 
-const RcsBridgeStateScript := preload("res://src/domain/telemetry/bridge_state.gd")
+const RcsBridgeStateScript := preload("res://src/domain/telemetry/bridge_state/bridge_state.gd")
 
 var robot_id := "burger1"
 var bridge_state := RcsBridgeStateScript.new()

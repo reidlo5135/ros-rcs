@@ -4,7 +4,10 @@
 #include "rcs_core/occupancy_codec.hpp"
 #include "rcs_core/path_projector.hpp"
 #include "rcs_core/protocol_codec.hpp"
+#include "rcs_core/replay_reader.hpp"
+#include "rcs_core/diff_drive_simulator.hpp"
 #include "rcs_core/tf_resolver.hpp"
+#include "rcs_core/urdf_resolver.hpp"
 
 #include <godot_cpp/core/defs.hpp>
 #include <godot_cpp/godot.hpp>
@@ -21,6 +24,9 @@ void initialize_rcs_core(ModuleInitializationLevel p_level) {
 	ClassDB::register_class<RcsTfResolver>();
 	ClassDB::register_class<RcsLaserScanProjector>();
 	ClassDB::register_class<RcsPathProjector>();
+	ClassDB::register_class<RcsUrdfResolver>();
+	ClassDB::register_class<RcsReplayReader>();
+	ClassDB::register_class<RcsDiffDriveSimulator>();
 }
 
 void uninitialize_rcs_core(ModuleInitializationLevel p_level) {

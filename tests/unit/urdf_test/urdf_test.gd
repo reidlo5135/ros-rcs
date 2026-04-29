@@ -4,7 +4,10 @@ const UrdfParserScript := preload("res://src/domain/robot_model/urdf_parser.gd")
 
 
 func _init() -> void:
-	var xml := """
+	UrdfParserScript.set_package_roots({
+		"turtlebot3_description": "res://assets/robots/turtlebot3_description",
+	})
+	var xml: String = """
 <robot name="burger_test">
   <link name="base_link">
     <visual>
@@ -28,7 +31,7 @@ func _init() -> void:
   </joint>
 </robot>
 """
-	var model := UrdfParserScript.parse(xml)
+	var model: Dictionary = UrdfParserScript.parse(xml)
 	if not str(model.get("parse_error", "")).is_empty():
 		push_error("URDF parse failed: " + str(model["parse_error"]))
 		quit(1)
@@ -56,6 +59,34 @@ func _init() -> void:
 	var base_link: Dictionary = model.get("links", {}).get("base_link", {})
 	if (base_link.get("collisions", []) as Array).size() != 1:
 		push_error("Unexpected URDF collision storage")
+		quit(1)
+		return
+	var visuals: Array = base_link.get("visuals", [])
+	if visuals.is_empty():
+		push_error("Expected URDF visual metadata")
+		quit(1)
+		return
+	var mesh_geometry: Dictionary = visuals[0].get("geometry", {})
+	if str(mesh_geometry.get("resolved_filename", "")) != "res://assets/robots/turtlebot3_description/meshes/base.dae":
+		push_error("URDF mesh resolver did not annotate the expected resource path")
+		quit(1)
+		return
+	if not bool(mesh_geometry.get("mesh_uri_resolved", false)):
+		push_error("URDF mesh resolver should mark configured package meshes as resolved")
+		quit(1)
+		return
+	if str(mesh_geometry.get("mesh_extension", "")) != "dae":
+		push_error("URDF mesh resolver should preserve mesh extension metadata")
+		quit(1)
+		return
+	var joint_transforms: Dictionary = model.get("joint_transforms", {})
+	if not joint_transforms.has("base_to_laser"):
+		push_error("URDF parser should emit joint transforms for downstream layers")
+		quit(1)
+		return
+	var link_local_transforms: Dictionary = model.get("link_local_transforms", {})
+	if not link_local_transforms.has("laser_link"):
+		push_error("URDF parser should expose link-local transforms keyed by child link")
 		quit(1)
 		return
 	print("URDF parser test passed")

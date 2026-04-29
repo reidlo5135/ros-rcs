@@ -6,7 +6,7 @@ const AIMissionPanelScene := preload("res://src/ui/panels/ai/ai.tscn")
 const TelemetryPanelScene := preload("res://src/ui/panels/telemetry/telemetry.tscn")
 const SceneViewportScene := preload("res://src/scene/viewport/viewport.tscn")
 const RcsMqttTransportScript := preload("res://src/domain/transport/mqtt_transport.gd")
-const RcsTelemetryRouterScript := preload("res://src/domain/telemetry/telemetry_router.gd")
+const RcsTelemetryRouterScript := preload("res://src/domain/telemetry/telemetry_router/telemetry_router.gd")
 const TopicCatalogScript := preload("res://src/domain/protocol/topic_catalog.gd")
 
 var transport: Node

@@ -4,7 +4,7 @@ signal session_added(session_id: String)
 signal active_session_changed(session_id: String)
 signal telemetry_updated(session_id: String, patch: Dictionary)
 
-const RcsBridgeStateScript := preload("res://src/domain/telemetry/bridge_state.gd")
+const RcsBridgeStateScript := preload("res://src/domain/telemetry/bridge_state/bridge_state.gd")
 
 var sessions: Dictionary = {}
 var active_session_id := "robot:burger1"
