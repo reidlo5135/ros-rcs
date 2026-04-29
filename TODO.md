@@ -17,11 +17,11 @@ The immediate target is feature parity with the previous RCS MQTT behavior, not 
 ## Phase 1 - Godot App Structure
 
 - [x] Split the temporary code-built UI in `src/app/main.gd` into Godot scenes.
-- [x] Create `src/ui/screens/operator_console.tscn`.
-- [x] Create `src/ui/components/topbar.tscn`.
-- [x] Create `src/ui/panels/operations_panel.tscn`.
-- [x] Create `src/ui/panels/telemetry_panel.tscn`.
-- [x] Create `src/scene/scene_viewport.tscn`.
+- [x] Create `src/ui/screens/operator/operator.tscn`.
+- [x] Create `src/ui/components/topbar/topbar.tscn`.
+- [x] Create `src/ui/panels/operation/operation.tscn`.
+- [x] Create `src/ui/panels/telemetry/telemetry.tscn`.
+- [x] Create `src/scene/viewport/viewport.tscn`.
 - [x] Keep `main.gd` as app composition/bootstrap only.
 - [x] Add a project theme for operator UI spacing, colors, typography, and button states.
 

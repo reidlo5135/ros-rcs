@@ -1,0 +1,7 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://src/ui/panels/operation/operation.gd" id="1_ops"]
+
+[node name="OperationsPanel" type="PanelContainer"]
+custom_minimum_size = Vector2(260, 0)
+script = ExtResource("1_ops")

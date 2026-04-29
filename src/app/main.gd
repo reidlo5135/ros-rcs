@@ -1,6 +1,6 @@
 extends Control
 
-const OperatorConsoleScene := preload("res://src/ui/screens/operator_console.tscn")
+const OperatorConsoleScene := preload("res://src/ui/screens/operator/operator.tscn")
 
 
 func _ready() -> void:

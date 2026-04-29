@@ -1,7 +1,0 @@
-[gd_scene load_steps=2 format=3]
-
-[ext_resource type="Script" path="res://src/scene/scene_viewport.gd" id="1_viewport"]
-
-[node name="SceneViewport" type="SubViewportContainer"]
-stretch = true
-script = ExtResource("1_viewport")

@@ -23,9 +23,9 @@ config/icon="res://assets/icons/rcs.svg"
 
 [autoload]
 
-AppState="*res://src/autoload/app_state.gd"
-CommandBus="*res://src/autoload/command_bus.gd"
-SessionRegistry="*res://src/autoload/session_registry.gd"
+AppState="*res://src/autoload/state/state.gd"
+CommandBus="*res://src/autoload/command/command.gd"
+SessionRegistry="*res://src/autoload/session/session.gd"
 
 [display]
 

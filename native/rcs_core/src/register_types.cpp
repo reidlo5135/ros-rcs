@@ -1,10 +1,10 @@
 #include "rcs_core/register_types.hpp"
 
-#include "rcs_core/rcs_laser_scan_projector.hpp"
-#include "rcs_core/rcs_occupancy_codec.hpp"
-#include "rcs_core/rcs_path_projector.hpp"
-#include "rcs_core/rcs_protocol_codec.hpp"
-#include "rcs_core/rcs_tf_resolver.hpp"
+#include "rcs_core/laser_scan_projector.hpp"
+#include "rcs_core/occupancy_codec.hpp"
+#include "rcs_core/path_projector.hpp"
+#include "rcs_core/protocol_codec.hpp"
+#include "rcs_core/tf_resolver.hpp"
 
 #include <godot_cpp/core/defs.hpp>
 #include <godot_cpp/godot.hpp>

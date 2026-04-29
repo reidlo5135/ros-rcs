@@ -44,9 +44,9 @@ tools/                  # Developer scripts and build notes.
 - `.gd` files are GDScript source files attached to scenes or used as domain services.
 - `.gd.uid` and `.gdextension.uid` files are Godot-generated resource IDs. Keep them in Git so scene/script references stay stable after renames or moves.
 - `project.godot` is the project entry point. It defines the main scene and autoload services.
-- `src/autoload` contains global services such as `AppState`, `CommandBus`, and `SessionRegistry`.
+- `src/autoload` contains global services such as `src/autoload/state/state.gd`, `src/autoload/command/command.gd`, and `src/autoload/session/session.gd`.
 - `src/domain` contains RCS state, protocol, command, session, transport, and telemetry logic. Raw MQTT payloads should be routed through this layer before reaching UI or scene scripts.
-- `src/scene` contains the 3D operator world. `rcs_world.gd` currently creates the camera, grid floor, and temporary robot marker.
+- `src/scene` contains the 3D operator world. `src/scene/world/world.gd` currently creates the camera, grid floor, and temporary robot marker.
 - `src/scene/layers` is the visualization layer model. Layers should eventually mirror RViz-style responsibilities such as map, costmap, robot, path, scan, TF, footprint, and goal markers.
 - `native/rcs_core` is the C++ GDExtension workspace for behavior that should be strict and stable over time.
 
