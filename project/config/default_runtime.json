@@ -1,5 +1,5 @@
 {
-  "version": "0.2.0",
+  "version": "0.2.5",
   "transport": {
     "broker_url": "ws://192.168.61.35:9001/mqtt",
     "secure_required": false,

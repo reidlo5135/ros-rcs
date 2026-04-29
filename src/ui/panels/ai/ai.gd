@@ -1,7 +1,7 @@
 extends PanelContainer
 
 const PROMPT_CONFIG_PATH := "res://assets/ai/prompt.json"
-const DEFAULT_PROMPT_SECTION_LABEL := "推荐 Prompt"
+const DEFAULT_PROMPT_SECTION_LABEL := "추천 AI Prompt"
 const DEFAULT_PROMPTS := [
 	"현재 활성 로봇의 상태를 한눈에 요약해 줘. 연결 상태, 배터리, 경로 진행 상황, 장애물 징후를 같이 알려줘.",
 	"burger1을 map 기준 x=-1.25, y=0.40으로 보내고 필요한 확인 절차를 함께 정리해 줘.",
@@ -292,21 +292,21 @@ func _provider_palette(provider: String) -> Dictionary:
 			}
 		_: # Ollama
 			return {
-				"chip_bg": Color(0.11, 0.12, 0.14),
-				"chip_border": Color(0.40, 0.47, 0.54),
-				"chip_text": Color(0.80, 0.87, 0.93),
-				"send_bg": Color(0.11, 0.13, 0.15),
-				"send_hover_bg": Color(0.15, 0.17, 0.19),
-				"send_border": Color(0.36, 0.43, 0.50),
-				"send_text": Color(0.84, 0.90, 0.96),
-				"badge_bg": Color(0.16, 0.18, 0.21),
-				"badge_border": Color(0.40, 0.47, 0.54),
-				"badge_fg": Color(0.82, 0.88, 0.94),
-				"bubble_bg": Color(0.10, 0.12, 0.14),
-				"bubble_border": Color(0.30, 0.36, 0.43),
-				"text": Color(0.86, 0.91, 0.96),
-				"panel_bg": Color(0.053, 0.057, 0.062),
-				"gradient_top": Color(0.42, 0.50, 0.58, 0.09),
+				"chip_bg": Color(0.025, 0.045, 0.105),
+				"chip_border": Color(0.14, 0.28, 0.62),
+				"chip_text": Color(0.74, 0.86, 1.0),
+				"send_bg": Color(0.03, 0.055, 0.13),
+				"send_hover_bg": Color(0.045, 0.08, 0.18),
+				"send_border": Color(0.16, 0.34, 0.72),
+				"send_text": Color(0.78, 0.89, 1.0),
+				"badge_bg": Color(0.035, 0.07, 0.16),
+				"badge_border": Color(0.18, 0.38, 0.76),
+				"badge_fg": Color(0.80, 0.90, 1.0),
+				"bubble_bg": Color(0.025, 0.05, 0.115),
+				"bubble_border": Color(0.12, 0.27, 0.58),
+				"text": Color(0.82, 0.91, 1.0),
+				"panel_bg": Color(0.025, 0.033, 0.07),
+				"gradient_top": Color(0.07, 0.18, 0.48, 0.22),
 			}
 
 
