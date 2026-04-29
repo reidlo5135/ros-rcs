@@ -16,7 +16,7 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 
 config/name="RCS"
 config/description="Robot Control System native operator runtime"
-config/version="0.2.5"
+config/version="0.2.6"
 run/main_scene="res://src/app/main.tscn"
 config/features=PackedStringArray("4.6", "Forward Plus")
 config/icon="res://assets/icons/rcs.svg"

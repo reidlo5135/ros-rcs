@@ -86,6 +86,9 @@ func _build_layout() -> void:
 	ai_mission_panel.prompt_submitted.connect(_on_ai_prompt_submitted)
 	ai_mission_panel.connect_requested.connect(_on_connect_requested)
 	ai_mission_panel.disconnect_requested.connect(_on_disconnect_requested)
+	ai_mission_panel.canvas_pick_mode_changed.connect(_on_ai_canvas_pick_mode_changed)
+	ai_mission_panel.preview_requested.connect(_on_ai_preview_requested)
+	ai_mission_panel.preview_cleared.connect(_on_ai_preview_cleared)
 	workspace.add_child(ai_mission_panel)
 
 	scene_shell = _build_scene_shell()
@@ -151,6 +154,7 @@ func _build_scene_shell() -> PanelContainer:
 
 	scene_viewport = SceneViewportScene.instantiate()
 	scene_viewport.waypoint_placed.connect(_on_waypoint_placed)
+	scene_viewport.ai_canvas_picked.connect(_on_ai_canvas_picked)
 	column.add_child(scene_viewport)
 	scene_viewport.call_deferred("set_camera_mode", "aim")
 	return shell
@@ -164,8 +168,16 @@ func _on_control_mode_changed(mode: String) -> void:
 	if ai_enabled:
 		ai_mission_panel.custom_minimum_size = Vector2(800, 0)
 		scene_shell.custom_minimum_size = Vector2(520, 0)
+		if scene_viewport != null and scene_viewport.has_method("set_waypoint_placement_enabled"):
+			scene_viewport.set_waypoint_placement_enabled(false)
+		if operations_panel != null and operations_panel.has_method("set_placing_enabled"):
+			operations_panel.set_placing_enabled(false)
 	else:
 		scene_shell.custom_minimum_size = Vector2(0, 0)
+		if scene_viewport != null and scene_viewport.has_method("set_ai_canvas_pick_mode"):
+			scene_viewport.set_ai_canvas_pick_mode("")
+		if scene_viewport != null and scene_viewport.has_method("clear_ai_preview"):
+			scene_viewport.clear_ai_preview()
 
 
 func _on_connect_requested(broker_url: String, robot_id: String) -> void:
@@ -214,20 +226,53 @@ func _on_waypoint_placed(world_position: Vector3, yaw: float) -> void:
 		operations_panel.add_waypoint(Vector3(world_position.x, 0.0, -world_position.z), yaw)
 
 
+func _on_ai_canvas_pick_mode_changed(mode: String) -> void:
+	if scene_viewport != null and scene_viewport.has_method("set_ai_canvas_pick_mode"):
+		scene_viewport.set_ai_canvas_pick_mode(mode)
+
+
+func _on_ai_canvas_picked(mode: String, world_position: Vector3, yaw: float) -> void:
+	if ai_mission_panel != null and ai_mission_panel.has_method("apply_canvas_pick"):
+		ai_mission_panel.apply_canvas_pick(mode, world_position, yaw)
+
+
+func _on_ai_preview_requested(preview: Dictionary) -> void:
+	if scene_viewport != null and scene_viewport.has_method("set_ai_preview"):
+		scene_viewport.set_ai_preview(preview)
+
+
+func _on_ai_preview_cleared() -> void:
+	if scene_viewport != null and scene_viewport.has_method("clear_ai_preview"):
+		scene_viewport.clear_ai_preview()
+
+
 func _on_layer_visibility_changed(layer_id: String, enabled: bool) -> void:
 	if scene_viewport != null and scene_viewport.has_method("set_visualization_layer_visible"):
 		scene_viewport.set_visualization_layer_visible(layer_id, enabled)
 
 
 func _on_ai_prompt_submitted(message: String, submission: Dictionary) -> void:
+	var preview := _preview_from_ai_submission(message, submission)
+	var preview_kind := str(preview.get("kind", "")).strip_edges()
+	if preview_kind == "navigation_cancel":
+		_on_ai_preview_cleared()
+	elif not preview.is_empty():
+		_on_ai_preview_requested(preview)
+
 	var parsed_value: Variant = submission.get("parsed_command", {})
+	var parsed_command: Dictionary = {}
 	if typeof(parsed_value) == TYPE_DICTIONARY:
-		var parsed_command: Dictionary = parsed_value
-		if str(parsed_command.get("kind", "")) == "navigation_pose" and ai_mission_panel != null and ai_mission_panel.has_method("begin_navigation_session"):
-			var robot_id := str(parsed_command.get("robot_id", active_robot_id)).strip_edges()
-			if robot_id.is_empty():
-				robot_id = active_robot_id
-			ai_mission_panel.begin_navigation_session(robot_id, str(submission.get("request_id", "")).strip_edges())
+		parsed_command = parsed_value as Dictionary
+	if str(parsed_command.get("kind", "")).strip_edges() == "navigation_pose" and ai_mission_panel != null and ai_mission_panel.has_method("begin_navigation_session"):
+		var robot_id := str(parsed_command.get("robot_id", active_robot_id)).strip_edges()
+		if robot_id.is_empty():
+			robot_id = active_robot_id
+		ai_mission_panel.begin_navigation_session(robot_id, str(submission.get("request_id", "")).strip_edges())
+	elif preview_kind in ["navigation_pose", "navigation_route"] and ai_mission_panel != null and ai_mission_panel.has_method("begin_navigation_session"):
+		var preview_robot_id := str(preview.get("robot_id", active_robot_id)).strip_edges()
+		if preview_robot_id.is_empty():
+			preview_robot_id = active_robot_id
+		ai_mission_panel.begin_navigation_session(preview_robot_id, str(submission.get("request_id", "")).strip_edges())
 
 	var target := str(submission.get("target", "MCP_SERVER")).strip_edges()
 	if target.is_empty():
@@ -320,6 +365,8 @@ func _on_control_event(robot_id: String, domain: String, channel: String, payloa
 func _handle_navigation_result_completion(robot_id: String, payload: Dictionary) -> void:
 	if not bool(payload.get("completed", false)) or not bool(payload.get("success", false)):
 		return
+	if scene_viewport != null and scene_viewport.has_method("clear_ai_preview"):
+		scene_viewport.clear_ai_preview()
 	var queued_goals := 0
 	if operations_panel != null and operations_panel.has_method("waypoint_count"):
 		queued_goals = int(operations_panel.waypoint_count())
@@ -335,6 +382,144 @@ func _handle_navigation_result_completion(robot_id: String, payload: Dictionary)
 	if operations_panel != null and operations_panel.has_method("clear_waypoints"):
 		operations_panel.clear_waypoints()
 	AppState.push_event("[%s] route completed; cleared %d waypoint(s)" % [robot_id, queued_goals])
+
+
+func _preview_from_ai_submission(message: String, submission: Dictionary) -> Dictionary:
+	var robot_id := str(submission.get("robot_id", active_robot_id)).strip_edges()
+	if robot_id.is_empty():
+		robot_id = active_robot_id
+	if robot_id.is_empty():
+		robot_id = AppState.default_robot_id()
+
+	var ui_preview_value: Variant = submission.get("ui_preview", {})
+	if typeof(ui_preview_value) == TYPE_DICTIONARY and not (ui_preview_value as Dictionary).is_empty():
+		return _normalized_preview(ui_preview_value as Dictionary, robot_id)
+
+	var parsed_value: Variant = submission.get("parsed_command", {})
+	if typeof(parsed_value) == TYPE_DICTIONARY and not (parsed_value as Dictionary).is_empty():
+		var parsed_preview := _preview_from_parsed_command(parsed_value as Dictionary)
+		if not parsed_preview.is_empty():
+			return _normalized_preview(parsed_preview, robot_id)
+
+	return _normalized_preview(_preview_from_message(message), robot_id)
+
+
+func _normalized_preview(preview: Dictionary, robot_id: String) -> Dictionary:
+	if preview.is_empty():
+		return {}
+	var normalized := preview.duplicate(true)
+	if not normalized.has("robot_id"):
+		normalized["robot_id"] = robot_id
+	return normalized
+
+
+func _preview_from_parsed_command(parsed_command: Dictionary) -> Dictionary:
+	var kind := str(parsed_command.get("kind", "")).strip_edges()
+	match kind:
+		"navigation_pose":
+			var payload_value: Variant = parsed_command.get("payload", {})
+			if typeof(payload_value) != TYPE_DICTIONARY:
+				return {}
+			var payload: Dictionary = payload_value
+			var goal_poses_value: Variant = payload.get("goal_poses", [])
+			if typeof(goal_poses_value) != TYPE_ARRAY or (goal_poses_value as Array).is_empty():
+				return {}
+			var goals: Array = goal_poses_value
+			var goal := _goal_from_pose_payload(goals[0])
+			if goal.is_empty():
+				return {}
+			return {
+				"kind": "navigation_pose",
+				"goals": [goal],
+			}
+		"initial_pose":
+			var pose_payload_value: Variant = parsed_command.get("payload", {})
+			if typeof(pose_payload_value) != TYPE_DICTIONARY:
+				return {}
+			var pose_payload: Dictionary = pose_payload_value
+			var pose_goal := _goal_from_pose_payload(pose_payload.get("pose", {}))
+			if pose_goal.is_empty():
+				return {}
+			return {
+				"kind": "initial_pose",
+				"goals": [pose_goal],
+			}
+		"navigation_cancel":
+			return {"kind": "navigation_cancel"}
+		_:
+			return {}
+
+
+func _preview_from_message(message: String) -> Dictionary:
+	if _message_requests_cancel(message):
+		return {"kind": "navigation_cancel"}
+	var goals := _extract_prompt_goals(message)
+	if goals.is_empty():
+		return {}
+	var preview_kind := "navigation_pose"
+	if _message_requests_initial_pose(message):
+		preview_kind = "initial_pose"
+	elif goals.size() > 1:
+		preview_kind = "navigation_route"
+	return {
+		"kind": preview_kind,
+		"goals": goals,
+	}
+
+
+func _extract_prompt_goals(message: String) -> Array[Dictionary]:
+	var regex := RegEx.new()
+	var compile_error := regex.compile("(?i)x\\s*=\\s*([-+]?\\d+(?:\\.\\d+)?)\\s*,?\\s*y\\s*=\\s*([-+]?\\d+(?:\\.\\d+)?)(?:\\s*,?\\s*yaw\\s*=\\s*([-+]?\\d+(?:\\.\\d+)?))?")
+	if compile_error != OK:
+		return []
+	var goals: Array[Dictionary] = []
+	for match in regex.search_all(message):
+		var x := float(match.get_string(1))
+		var y := float(match.get_string(2))
+		var yaw_text := str(match.get_string(3)).strip_edges()
+		goals.append({
+			"position": Vector3(x, 0.0, -y),
+			"yaw": float(yaw_text) if not yaw_text.is_empty() else 0.0,
+		})
+	return goals
+
+
+func _message_requests_initial_pose(message: String) -> bool:
+	var lowered := message.to_lower()
+	return lowered.contains("initial pose") or lowered.contains("initialpose") or message.find("초기 위치") >= 0 or message.find("초기위치") >= 0
+
+
+func _message_requests_cancel(message: String) -> bool:
+	var lowered := message.to_lower()
+	return lowered.contains("cancel goal") or lowered.contains("cancel navigation") or lowered.contains("cancel") or message.find("취소") >= 0
+
+
+func _goal_from_pose_payload(pose_value: Variant) -> Dictionary:
+	if typeof(pose_value) != TYPE_DICTIONARY:
+		return {}
+	var pose: Dictionary = pose_value
+	var position_value: Variant = pose.get("position", {})
+	var orientation_value: Variant = pose.get("orientation", {})
+	if typeof(position_value) != TYPE_DICTIONARY:
+		return {}
+	var position: Dictionary = position_value
+	var x := float(position.get("x", 0.0))
+	var y := float(position.get("y", 0.0))
+	var yaw := 0.0
+	if typeof(orientation_value) == TYPE_DICTIONARY:
+		yaw = _yaw_from_quaternion(orientation_value as Dictionary)
+	return {
+		"position": Vector3(x, 0.0, -y),
+		"yaw": yaw,
+	}
+
+
+func _yaw_from_quaternion(value: Dictionary) -> float:
+	var x := float(value.get("x", 0.0))
+	var y := float(value.get("y", 0.0))
+	var z := float(value.get("z", 0.0))
+	var w := float(value.get("w", 1.0))
+	return atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
 
 
 func _control_patch_for(domain: String, channel: String, payload: Variant) -> Dictionary:

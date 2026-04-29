@@ -1,6 +1,7 @@
 extends Node3D
 
 signal waypoint_placed(position: Vector3, yaw: float)
+signal ai_canvas_picked(mode: String, position: Vector3, yaw: float)
 
 const MapLayerScript: Script = preload("res://src/scene/layers/map/map_layer.gd")
 const RobotLayerScript: Script = preload("res://src/scene/layers/robot/robot_layer.gd")
@@ -41,9 +42,11 @@ var panning := false
 var grabbing := false
 var map_auto_framed := false
 var waypoint_placement_enabled := false
+var ai_canvas_pick_mode := ""
 var waypoint_root: Node3D
 var waypoint_line: MeshInstance3D
 var waypoints: Array[Vector3] = []
+var ai_preview_root: Node3D
 var camera_mode := "aim"
 var last_robot_position := Vector3.ZERO
 var last_robot_yaw := 0.0
@@ -55,6 +58,7 @@ func _ready() -> void:
 	_build_floor()
 	_build_layers()
 	_build_waypoint_layer()
+	_build_ai_preview_layer()
 	SessionRegistry.telemetry_updated.connect(_on_telemetry_updated)
 	SessionRegistry.active_session_changed.connect(_on_active_session_changed)
 	_apply_active_state()
@@ -165,6 +169,12 @@ func _build_waypoint_layer() -> void:
 	waypoint_root = Node3D.new()
 	waypoint_root.name = "WaypointLayer"
 	add_child(waypoint_root)
+
+
+func _build_ai_preview_layer() -> void:
+	ai_preview_root = Node3D.new()
+	ai_preview_root.name = "AiPreviewLayer"
+	add_child(ai_preview_root)
 
 
 func _build_path_layer(name: String) -> MeshInstance3D:
@@ -278,7 +288,7 @@ func release_viewport_input() -> void:
 	orbiting = false
 	panning = false
 	grabbing = false
-	Input.set_default_cursor_shape(Input.CURSOR_CROSS if waypoint_placement_enabled else Input.CURSOR_ARROW)
+	_update_cursor_shape()
 
 
 func set_waypoint_placement_enabled(enabled: bool) -> void:
@@ -286,7 +296,53 @@ func set_waypoint_placement_enabled(enabled: bool) -> void:
 	orbiting = false
 	panning = false
 	grabbing = false
-	Input.set_default_cursor_shape(Input.CURSOR_CROSS if enabled else Input.CURSOR_ARROW)
+	_update_cursor_shape()
+
+
+func set_ai_canvas_pick_mode(mode: String) -> void:
+	ai_canvas_pick_mode = mode.strip_edges()
+	orbiting = false
+	panning = false
+	grabbing = false
+	_update_cursor_shape()
+
+
+func set_ai_preview(preview: Dictionary) -> void:
+	clear_ai_preview()
+	if preview.is_empty() or ai_preview_root == null:
+		return
+	var preview_kind := str(preview.get("kind", "")).strip_edges()
+	var goals_value: Variant = preview.get("goals", [])
+	if typeof(goals_value) != TYPE_ARRAY:
+		return
+	var goals: Array = goals_value
+	if goals.is_empty():
+		return
+
+	var marker_color := _preview_color(preview_kind)
+	var preview_points: Array[Vector3] = []
+	for index in range(goals.size()):
+		var goal_value: Variant = goals[index]
+		if typeof(goal_value) != TYPE_DICTIONARY:
+			continue
+		var goal: Dictionary = goal_value
+		var position_value: Variant = goal.get("position", Vector3.ZERO)
+		if typeof(position_value) != TYPE_VECTOR3:
+			continue
+		var position: Vector3 = position_value
+		var yaw := float(goal.get("yaw", 0.0))
+		preview_points.append(position)
+		_add_preview_marker(position, yaw, index + 1, marker_color, "AiPreview")
+
+	if preview_points.size() >= 2 and preview_kind == "navigation_route":
+		_add_preview_line(preview_points, marker_color)
+
+
+func clear_ai_preview() -> void:
+	if ai_preview_root == null:
+		return
+	for child in ai_preview_root.get_children():
+		child.queue_free()
 
 
 func set_visualization_layer_visible(layer_id: String, enabled: bool) -> void:
@@ -352,7 +408,8 @@ func set_camera_mode(next_mode: String) -> void:
 func reset_view_modes() -> void:
 	camera_mode = "free"
 	waypoint_placement_enabled = false
-	Input.set_default_cursor_shape(Input.CURSOR_ARROW)
+	ai_canvas_pick_mode = ""
+	_update_cursor_shape()
 	reset_camera()
 
 
@@ -380,11 +437,20 @@ func _handle_mouse_button(event: InputEventMouseButton) -> void:
 					_zoom_camera(1.14)
 		MOUSE_BUTTON_RIGHT:
 			orbiting = event.pressed
-			Input.set_default_cursor_shape(Input.CURSOR_DRAG if orbiting else Input.CURSOR_ARROW)
+			if orbiting:
+				Input.set_default_cursor_shape(Input.CURSOR_DRAG)
+			else:
+				_update_cursor_shape()
 		MOUSE_BUTTON_MIDDLE:
 			panning = event.pressed
-			Input.set_default_cursor_shape(Input.CURSOR_DRAG if panning else Input.CURSOR_ARROW)
+			if panning:
+				Input.set_default_cursor_shape(Input.CURSOR_DRAG)
+			else:
+				_update_cursor_shape()
 		MOUSE_BUTTON_LEFT:
+			if not ai_canvas_pick_mode.is_empty() and event.pressed and not event.double_click:
+				_pick_ai_canvas_target(event.position)
+				return
 			if waypoint_placement_enabled and event.pressed and not event.double_click:
 				_place_waypoint_from_screen(event.position)
 				return
@@ -392,7 +458,10 @@ func _handle_mouse_button(event: InputEventMouseButton) -> void:
 				reset_camera()
 			else:
 				grabbing = event.pressed
-				Input.set_default_cursor_shape(Input.CURSOR_DRAG if grabbing else Input.CURSOR_ARROW)
+				if grabbing:
+					Input.set_default_cursor_shape(Input.CURSOR_DRAG)
+				else:
+					_update_cursor_shape()
 
 
 func _handle_mouse_motion(event: InputEventMouseMotion) -> void:
@@ -442,6 +511,12 @@ func _place_waypoint_from_screen(screen_position: Vector2) -> void:
 	_add_waypoint_marker(world_position, yaw, waypoints.size())
 	_rebuild_waypoint_line()
 	waypoint_placed.emit(world_position, yaw)
+
+
+func _pick_ai_canvas_target(screen_position: Vector2) -> void:
+	var world_position := _screen_to_ground(screen_position)
+	var yaw := last_robot_yaw if ai_canvas_pick_mode == "initial_pose" else _yaw_toward_target(last_robot_position, world_position)
+	ai_canvas_picked.emit(ai_canvas_pick_mode, world_position, yaw)
 
 
 func _screen_to_ground(screen_position: Vector2) -> Vector3:
@@ -506,6 +581,75 @@ func _rebuild_waypoint_line() -> void:
 	waypoint_line.name = "WaypointPath"
 	waypoint_line.mesh = mesh
 	waypoint_root.add_child(waypoint_line)
+
+
+func _add_preview_marker(position: Vector3, yaw: float, index: int, color: Color, prefix: String) -> void:
+	if ai_preview_root == null:
+		return
+	var marker_root := Node3D.new()
+	marker_root.name = "%s%d" % [prefix, index]
+	marker_root.position = Vector3(position.x, WAYPOINT_Y_OFFSET + 0.025, position.z)
+	marker_root.rotation.y = -yaw
+	ai_preview_root.add_child(marker_root)
+
+	var marker := MeshInstance3D.new()
+	marker.name = "LocationMarker"
+	marker.mesh = _location_marker_mesh()
+	marker.rotation_degrees.x = -90.0
+	marker.material_override = _waypoint_material(color)
+	marker_root.add_child(marker)
+
+	var center_dot := MeshInstance3D.new()
+	var dot_mesh := CylinderMesh.new()
+	dot_mesh.top_radius = 0.03
+	dot_mesh.bottom_radius = 0.03
+	dot_mesh.height = 0.008
+	dot_mesh.radial_segments = 24
+	center_dot.name = "LocationMarkerCenter"
+	center_dot.mesh = dot_mesh
+	center_dot.position = Vector3(0.0, 0.002, 0.0)
+	center_dot.material_override = _waypoint_material(Color(0.035, 0.04, 0.05))
+	marker_root.add_child(center_dot)
+
+
+func _add_preview_line(points: Array[Vector3], color: Color) -> void:
+	if ai_preview_root == null or points.size() < 2:
+		return
+	var mesh := ImmediateMesh.new()
+	mesh.surface_begin(Mesh.PRIMITIVE_LINES, _waypoint_material(color))
+	for index in range(points.size() - 1):
+		var start := points[index]
+		var finish := points[index + 1]
+		mesh.surface_add_vertex(Vector3(start.x, WAYPOINT_Y_OFFSET + 0.035, start.z))
+		mesh.surface_add_vertex(Vector3(finish.x, WAYPOINT_Y_OFFSET + 0.035, finish.z))
+	mesh.surface_end()
+
+	var line := MeshInstance3D.new()
+	line.name = "AiPreviewPath"
+	line.mesh = mesh
+	ai_preview_root.add_child(line)
+
+
+func _preview_color(kind: String) -> Color:
+	match kind:
+		"initial_pose":
+			return Color(0.34, 0.94, 0.52)
+		"navigation_route":
+			return Color(0.98, 0.58, 0.18)
+		_:
+			return Color(0.22, 0.82, 1.0)
+
+
+func _yaw_toward_target(origin: Vector3, target: Vector3) -> float:
+	var delta := target - origin
+	if Vector2(delta.x, delta.z).length() <= 0.001:
+		return 0.0
+	return atan2(-delta.z, delta.x)
+
+
+func _update_cursor_shape() -> void:
+	var picking_enabled := waypoint_placement_enabled or not ai_canvas_pick_mode.is_empty()
+	Input.set_default_cursor_shape(Input.CURSOR_CROSS if picking_enabled else Input.CURSOR_ARROW)
 
 
 func _waypoint_material(color: Color) -> StandardMaterial3D:

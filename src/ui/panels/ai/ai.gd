@@ -49,6 +49,9 @@ class GearButton:
 signal prompt_submitted(message: String, submission: Dictionary)
 signal connect_requested(broker_url: String, robot_id: String)
 signal disconnect_requested()
+signal canvas_pick_mode_changed(mode: String)
+signal preview_requested(preview: Dictionary)
+signal preview_cleared()
 
 var input: TextEdit
 var transcript_scroll: ScrollContainer
@@ -66,6 +69,10 @@ var _panel_gradient_top: Color = Color.TRANSPARENT
 var last_navigation_status_keys: Dictionary = {}
 var last_navigation_result_keys: Dictionary = {}
 var navigation_sessions: Dictionary = {}
+var map_tool_buttons: Dictionary = {}
+var current_canvas_pick_mode := ""
+var drafted_preview_goals: Array[Dictionary] = []
+var drafted_preview_kind := ""
 
 var connection_popup: PopupPanel
 var chat_endpoint_input: LineEdit
@@ -140,12 +147,12 @@ func _build_ui() -> void:
 	title_label = Label.new()
 	title_label.text = "AI MISSION CONTROL"
 	title_label.add_theme_color_override("font_color", Color(0.85, 0.9, 0.98))
-	title_label.add_theme_font_size_override("font_size", 18)
+	title_label.add_theme_font_size_override("font_size", 20)
 	title_column.add_child(title_label)
 
 	summary_label = Label.new()
 	summary_label.add_theme_color_override("font_color", Color(0.62, 0.69, 0.71))
-	summary_label.add_theme_font_size_override("font_size", 11)
+	summary_label.add_theme_font_size_override("font_size", 12)
 	title_column.add_child(summary_label)
 
 	chat_status_label = Label.new()
@@ -181,11 +188,13 @@ func _build_ui() -> void:
 		provider_buttons[provider] = chip
 		providers_row.add_child(chip)
 
+	column.add_child(_build_map_toolbox())
+
 	var prompt_config := _load_prompt_config()
 	prompt_section_label = Label.new()
 	prompt_section_label.text = str(prompt_config.get("prompt_section_label", DEFAULT_PROMPT_SECTION_LABEL))
 	prompt_section_label.add_theme_color_override("font_color", Color(0.42, 0.49, 0.58))
-	prompt_section_label.add_theme_font_size_override("font_size", 10)
+	prompt_section_label.add_theme_font_size_override("font_size", 11)
 	column.add_child(prompt_section_label)
 	var prompts: Array = prompt_config.get("prompts", DEFAULT_PROMPTS)
 	for prompt in prompts:
@@ -210,10 +219,10 @@ func _build_ui() -> void:
 	transcript.add_theme_constant_override("separation", 14)
 	transcript.resized.connect(_on_transcript_resized)
 	transcript_margin.add_child(transcript)
-	_add_message("자연어 프롬프트는 MCP_SERVER WebSocket으로 전달되고, 내비게이션 진행 상황은 이 타임라인에 계속 쌓입니다.", "system", "SYS")
+	_add_message(_system_intro_text(), "system", "SYS")
 
 	input = TextEdit.new()
-	input.placeholder_text = "활성 로봇에 대해 %s에게 지시하거나 질문하세요..." % current_provider
+	input.placeholder_text = _input_placeholder_text(current_provider)
 	input.custom_minimum_size = Vector2(0, 92)
 	input.add_theme_stylebox_override("normal", _input_style())
 	input.gui_input.connect(_on_input_gui_input)
@@ -244,11 +253,62 @@ func _provider_chip(text: String, active: bool, group: ButtonGroup) -> Button:
 	button.toggle_mode = true
 	button.button_pressed = active
 	button.button_group = group
-	button.custom_minimum_size = Vector2(72, 24)
+	button.custom_minimum_size = Vector2(78, 26)
 	button.pressed.connect(func() -> void:
 		_set_provider(text)
 	)
 	_apply_provider_button_state(button, active)
+	return button
+
+
+func _build_map_toolbox() -> Control:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+
+	var label := Label.new()
+	label.text = "맵에서 좌표 가져오기"
+	label.add_theme_color_override("font_color", Color(0.58, 0.66, 0.78))
+	label.add_theme_font_size_override("font_size", 11)
+	row.add_child(label)
+
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(spacer)
+
+	row.add_child(_map_tool_button("초기 위치", "initial_pose"))
+	row.add_child(_map_tool_button("목표", "goal"))
+	row.add_child(_map_tool_button("경유", "route"))
+
+	var cancel_button := Button.new()
+	cancel_button.text = "취소"
+	cancel_button.custom_minimum_size = Vector2(56, 26)
+	cancel_button.add_theme_stylebox_override("normal", _button_style(Color(0.13, 0.08, 0.09), Color(0.34, 0.20, 0.24)))
+	cancel_button.add_theme_stylebox_override("hover", _button_style(Color(0.16, 0.10, 0.11), Color(0.42, 0.24, 0.28)))
+	cancel_button.add_theme_color_override("font_color", Color(1.0, 0.82, 0.84))
+	cancel_button.pressed.connect(_insert_cancel_prompt)
+	row.add_child(cancel_button)
+
+	var clear_button := Button.new()
+	clear_button.text = "지우기"
+	clear_button.custom_minimum_size = Vector2(62, 26)
+	clear_button.add_theme_stylebox_override("normal", _button_style(Color(0.08, 0.10, 0.14), Color(0.20, 0.24, 0.32)))
+	clear_button.add_theme_stylebox_override("hover", _button_style(Color(0.10, 0.12, 0.17), Color(0.26, 0.30, 0.40)))
+	clear_button.add_theme_color_override("font_color", Color(0.76, 0.82, 0.90))
+	clear_button.pressed.connect(clear_canvas_draft)
+	row.add_child(clear_button)
+
+	return row
+
+
+func _map_tool_button(label_text: String, mode: String) -> Button:
+	var button := Button.new()
+	button.text = label_text
+	button.toggle_mode = true
+	button.custom_minimum_size = Vector2(68, 26)
+	button.pressed.connect(func() -> void:
+		_set_canvas_pick_mode(mode if button.button_pressed else "")
+	)
+	map_tool_buttons[mode] = button
 	return button
 
 
@@ -313,7 +373,7 @@ func _provider_palette(provider: String) -> Dictionary:
 func _set_provider(provider: String) -> void:
 	current_provider = provider
 	if input != null:
-		input.placeholder_text = "활성 로봇에 대해 %s에게 지시하거나 질문하세요..." % provider
+		input.placeholder_text = _input_placeholder_text(provider)
 	for key in provider_buttons.keys():
 		var button_value: Variant = provider_buttons[key]
 		if typeof(button_value) != TYPE_OBJECT:
@@ -333,11 +393,34 @@ func _update_send_button() -> void:
 	if send_button == null:
 		return
 	var palette := _provider_palette(current_provider)
-	send_button.text = "%s로 전송" % current_provider
+	send_button.text = "%s에게 보내기" % current_provider
 	send_button.add_theme_stylebox_override("normal", _button_style(palette["send_bg"], palette["send_border"]))
 	send_button.add_theme_stylebox_override("hover", _button_style(palette["send_hover_bg"], palette["send_border"].lightened(0.14)))
 	send_button.add_theme_stylebox_override("pressed", _button_style(palette["send_bg"].darkened(0.08), palette["send_border"]))
 	send_button.add_theme_color_override("font_color", palette["send_text"])
+
+
+func _set_canvas_pick_mode(mode: String) -> void:
+	current_canvas_pick_mode = mode
+	_refresh_map_tool_buttons()
+	canvas_pick_mode_changed.emit(mode)
+
+
+func _refresh_map_tool_buttons() -> void:
+	for key in map_tool_buttons.keys():
+		var button := map_tool_buttons[key] as Button
+		if button == null:
+			continue
+		var active := str(key) == current_canvas_pick_mode
+		button.button_pressed = active
+		if active:
+			button.add_theme_stylebox_override("normal", _button_style(Color(0.10, 0.19, 0.34), Color(0.30, 0.58, 0.98)))
+			button.add_theme_stylebox_override("hover", _button_style(Color(0.12, 0.22, 0.39), Color(0.36, 0.64, 1.0)))
+			button.add_theme_color_override("font_color", Color(0.86, 0.94, 1.0))
+		else:
+			button.add_theme_stylebox_override("normal", _button_style(Color(0.075, 0.09, 0.11), Color(0.18, 0.22, 0.28)))
+			button.add_theme_stylebox_override("hover", _button_style(Color(0.09, 0.11, 0.14), Color(0.26, 0.32, 0.40)))
+			button.add_theme_color_override("font_color", Color(0.76, 0.82, 0.90))
 
 
 func _apply_panel_theme(provider: String) -> void:
@@ -433,7 +516,7 @@ func _prompt_button(text: String) -> Button:
 	var button := Button.new()
 	button.text = text
 	button.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	button.custom_minimum_size = Vector2(0, 38)
+	button.custom_minimum_size = Vector2(0, 40)
 	button.add_theme_stylebox_override("normal", _button_style(Color(0.075, 0.09, 0.11), Color(0.18, 0.22, 0.28)))
 	button.add_theme_stylebox_override("hover", _button_style(Color(0.09, 0.11, 0.14), Color(0.26, 0.32, 0.4)))
 	button.add_theme_color_override("font_color", Color(0.86, 0.92, 1.0))
@@ -467,6 +550,97 @@ func _load_prompt_config() -> Dictionary:
 		if not cleaned_prompts.is_empty():
 			prompt_config["prompts"] = cleaned_prompts
 	return prompt_config
+
+
+func apply_canvas_pick(mode: String, position: Vector3, yaw: float) -> void:
+	var robot_id := AppState.active_robot_id.strip_edges()
+	if robot_id.is_empty():
+		robot_id = AppState.default_robot_id()
+
+	if mode == "route" and not drafted_preview_goals.is_empty():
+		var previous_goal: Dictionary = drafted_preview_goals[drafted_preview_goals.size() - 1]
+		var previous_position: Vector3 = previous_goal.get("position", position)
+		var delta := position - previous_position
+		if Vector2(delta.x, delta.z).length() > 0.001:
+			yaw = atan2(-delta.z, delta.x)
+
+	var goal := {
+		"position": position,
+		"yaw": yaw,
+	}
+	match mode:
+		"initial_pose":
+			drafted_preview_kind = "initial_pose"
+			drafted_preview_goals = [goal]
+			input.text = _initial_pose_prompt_text(robot_id, position, yaw)
+			_set_canvas_pick_mode("")
+		"goal":
+			drafted_preview_kind = "navigation_pose"
+			drafted_preview_goals = [goal]
+			input.text = _goal_prompt_text(robot_id, position, yaw)
+			_set_canvas_pick_mode("")
+		"route":
+			drafted_preview_kind = "navigation_route"
+			drafted_preview_goals.append(goal)
+			input.text = _route_prompt_text(robot_id, drafted_preview_goals)
+		_:
+			return
+
+	_emit_preview_request()
+	input.grab_focus()
+	input.set_caret_column(input.text.length())
+
+
+func clear_canvas_draft() -> void:
+	drafted_preview_goals.clear()
+	drafted_preview_kind = ""
+	_set_canvas_pick_mode("")
+	preview_cleared.emit()
+
+
+func _insert_cancel_prompt() -> void:
+	var robot_id := AppState.active_robot_id.strip_edges()
+	if robot_id.is_empty():
+		robot_id = AppState.default_robot_id()
+	input.text = "%s의 현재 이동 목표를 취소해줘." % robot_id
+	clear_canvas_draft()
+	input.grab_focus()
+	input.set_caret_column(input.text.length())
+
+
+func _emit_preview_request() -> void:
+	var preview := _current_ui_preview()
+	if preview.is_empty():
+		preview_cleared.emit()
+		return
+	preview_requested.emit(preview)
+
+
+func _current_ui_preview() -> Dictionary:
+	if drafted_preview_goals.is_empty():
+		return {}
+	return {
+		"kind": drafted_preview_kind,
+		"goals": drafted_preview_goals.duplicate(true),
+	}
+
+
+func _goal_prompt_text(robot_id: String, position: Vector3, yaw: float) -> String:
+	return "%s 목표를 map 기준 x=%.2f, y=%.2f, yaw=%.2f로 설정해줘." % [robot_id, position.x, -position.z, yaw]
+
+
+func _initial_pose_prompt_text(robot_id: String, position: Vector3, yaw: float) -> String:
+	return "%s 초기 위치를 map 기준 x=%.2f, y=%.2f, yaw=%.2f로 설정해줘." % [robot_id, position.x, -position.z, yaw]
+
+
+func _route_prompt_text(robot_id: String, goals: Array[Dictionary]) -> String:
+	var lines := ["%s 경유 지점을 순서대로 추가해줘." % robot_id]
+	for index in range(goals.size()):
+		var goal := goals[index]
+		var position: Vector3 = goal.get("position", Vector3.ZERO)
+		var yaw := float(goal.get("yaw", 0.0))
+		lines.append("%d) map 기준 x=%.2f, y=%.2f, yaw=%.2f" % [index + 1, position.x, -position.z, yaw])
+	return "\n".join(lines)
 
 
 func _add_message(text: String, role := "assistant", badge_override := "") -> void:
@@ -519,7 +693,7 @@ func _add_message(text: String, role := "assistant", badge_override := "") -> vo
 	badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	badge.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	badge.add_theme_color_override("font_color", palette["badge_fg"])
-	badge.add_theme_font_size_override("font_size", 11)
+	badge.add_theme_font_size_override("font_size", 10)
 	badge.add_theme_stylebox_override("normal", _pill_style(palette["badge_bg"], palette["badge_border"], 17))
 
 	var bubble_shell := MarginContainer.new()
@@ -542,7 +716,7 @@ func _add_message(text: String, role := "assistant", badge_override := "") -> vo
 	bubble_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	bubble_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bubble_label.add_theme_color_override("font_color", palette["text"])
-	bubble_label.add_theme_font_size_override("font_size", 13)
+	bubble_label.add_theme_font_size_override("font_size", 14)
 	bubble_margin.add_child(bubble_label)
 
 	if safe_role == "user":
@@ -614,6 +788,9 @@ func _chat_request_payload(message: String, parsed_command := {}) -> Dictionary:
 		},
 		"timestamp": Time.get_datetime_string_from_system(true, true),
 	}
+	var ui_preview := _current_ui_preview()
+	if not ui_preview.is_empty():
+		payload["ui_preview"] = ui_preview
 	if typeof(parsed_command) == TYPE_DICTIONARY and not (parsed_command as Dictionary).is_empty():
 		var structured_command: Dictionary = parsed_command
 		payload["parsed_command"] = structured_command
@@ -630,7 +807,7 @@ func _submit_prompt() -> void:
 		return
 	_add_message(message, "user", current_provider.left(3).to_upper())
 	if ws_peer == null or ws_peer.get_ready_state() != WebSocketPeer.STATE_OPEN:
-		_add_message("MCP_SERVER WebSocket is offline. Reconnect the server and send again.", "system", "SYS")
+		_add_message("MCP 서버 연결이 끊겨 있어요. 다시 연결한 뒤 보내주세요.", "system", "SYS")
 		AppState.push_event("AI prompt blocked: MCP_SERVER offline")
 		return
 
@@ -638,7 +815,7 @@ func _submit_prompt() -> void:
 	var submission := _chat_request_payload(message, parsed_command)
 	var send_error := ws_peer.send_text(JSON.stringify(submission))
 	if send_error != OK:
-		_add_message("Failed to send prompt to MCP_SERVER: %s" % error_string(send_error), "system", "SYS")
+		_add_message("메시지를 보내지 못했습니다: %s" % error_string(send_error), "system", "SYS")
 		AppState.push_event("AI prompt send failed: %s" % error_string(send_error))
 		return
 
@@ -1114,13 +1291,13 @@ func _open_connection_settings() -> void:
 	var title := Label.new()
 	title.text = "Connection Settings"
 	title.add_theme_color_override("font_color", Color(0.86, 0.9, 0.96))
-	title.add_theme_font_size_override("font_size", 15)
+	title.add_theme_font_size_override("font_size", 17)
 	title_col.add_child(title)
 
 	var subtitle := Label.new()
 	subtitle.text = "RMS /chat 소켓과 MQTT 연결 설정을 같은 방식으로 관리합니다."
 	subtitle.add_theme_color_override("font_color", Color(0.42, 0.49, 0.58))
-	subtitle.add_theme_font_size_override("font_size", 11)
+	subtitle.add_theme_font_size_override("font_size", 12)
 	title_col.add_child(subtitle)
 
 	var close_btn := Button.new()
@@ -1242,7 +1419,7 @@ func _add_section_header(parent: Control, text: String) -> void:
 	var label := Label.new()
 	label.text = text
 	label.add_theme_color_override("font_color", Color(0.42, 0.49, 0.58))
-	label.add_theme_font_size_override("font_size", 10)
+	label.add_theme_font_size_override("font_size", 11)
 	parent.add_child(label)
 
 
@@ -1250,7 +1427,7 @@ func _add_modal_section_header(parent: Control, text: String) -> void:
 	var label := Label.new()
 	label.text = text
 	label.add_theme_color_override("font_color", Color(0.42, 0.49, 0.58))
-	label.add_theme_font_size_override("font_size", 10)
+	label.add_theme_font_size_override("font_size", 11)
 	parent.add_child(label)
 
 
@@ -1270,7 +1447,7 @@ func _separator() -> HSeparator:
 func _dialog_button(text: String, bg: Color, fg: Color) -> Button:
 	var button := Button.new()
 	button.text = text
-	button.custom_minimum_size = Vector2(0, 32)
+	button.custom_minimum_size = Vector2(0, 34)
 	button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	button.add_theme_stylebox_override("normal", _button_style(bg, bg.lightened(0.18)))
 	button.add_theme_stylebox_override("hover", _button_style(bg.lightened(0.06), bg.lightened(0.28)))
@@ -1380,13 +1557,13 @@ func _open_connection_settings_dialog() -> void:
 	var title := Label.new()
 	title.text = "Connection Settings"
 	title.add_theme_color_override("font_color", Color(0.94, 0.96, 0.98))
-	title.add_theme_font_size_override("font_size", 15)
+	title.add_theme_font_size_override("font_size", 17)
 	title_col.add_child(title)
 
 	var subtitle := Label.new()
 	subtitle.text = "MCP_SERVER WebSocket과 MQTT 연결을 한 곳에서 관리합니다."
 	subtitle.add_theme_color_override("font_color", Color(0.56, 0.64, 0.68))
-	subtitle.add_theme_font_size_override("font_size", 11)
+	subtitle.add_theme_font_size_override("font_size", 12)
 	title_col.add_child(subtitle)
 
 	var close_btn := Button.new()
@@ -1528,7 +1705,7 @@ func _navigation_status_text(status: int) -> String:
 func _sanitize_ui_text(text: String) -> String:
 	var cleaned := text
 	var replacements := {
-		"Natural-language prompts are forwarded to MCP_SERVER over WebSocket, and navigation lifecycle updates stay in this timeline.": "자연어 프롬프트는 MCP_SERVER WebSocket으로 전달되고, 내비게이션 진행 상황은 이 타임라인에 계속 쌓입니다.",
+		"Natural-language prompts are forwarded to MCP_SERVER over WebSocket, and navigation lifecycle updates stay in this timeline.": _system_intro_text(),
 		"?곹깭": "status",
 		"寃곌낵": "result",
 		"異쒕컻": "Executing",
@@ -1549,7 +1726,7 @@ func _clear_transcript() -> void:
 		return
 	for child in transcript.get_children():
 		child.queue_free()
-	_add_message("자연어 프롬프트는 MCP_SERVER WebSocket으로 전달되고, 내비게이션 진행 상황은 이 타임라인에 계속 쌓입니다.", "system", "SYS")
+	_add_message(_system_intro_text(), "system", "SYS")
 
 
 func _refresh_context_labels() -> void:
@@ -1558,18 +1735,27 @@ func _refresh_context_labels() -> void:
 		robot_id = "burger1"
 	mqtt_robot_id = robot_id
 	if summary_label != null:
-		var mcp_status := "MCP online" if ws_connected else "MCP offline"
-		summary_label.text = "Robot %s | MQTT %s | %s | Provider %s" % [robot_id, AppState.connection_state, mcp_status, current_provider]
+		var mqtt_status := "연결됨" if AppState.connection_state == "Connected" else "연결 안 됨"
+		var mcp_status := "연결됨" if ws_connected else "연결 안 됨"
+		summary_label.text = "로봇 %s | MQTT %s | MCP %s | %s" % [robot_id, mqtt_status, mcp_status, current_provider]
 	if helper_label != null:
 		if ws_connected:
-			helper_label.text = "Ctrl+Enter로 MCP_SERVER에 바로 전송합니다."
+			helper_label.text = "Ctrl+Enter로 바로 보낼 수 있습니다."
 		else:
-			helper_label.text = "프롬프트를 보내기 전에 MCP_SERVER를 연결하세요."
+			helper_label.text = "메시지를 보내려면 먼저 MCP 서버에 연결하세요."
 
 
 func _refresh_send_state() -> void:
 	if send_button != null:
 		send_button.disabled = not ws_connected
+
+
+func _system_intro_text() -> String:
+	return "로봇에게 보낼 요청을 입력하면 MCP 서버로 전달되고, 주행 상태도 이 타임라인에서 함께 볼 수 있습니다."
+
+
+func _input_placeholder_text(provider: String) -> String:
+	return "활성 로봇에 대해 %s에게 물어보거나, 실행할 작업을 적어보세요." % provider
 
 
 func _on_transport_state_changed(_next_state: String) -> void:

@@ -1,3 +1,17 @@
 [gd_resource type="Theme" format=3]
 
 [resource]
+default_font_size = 13
+Label/colors/font_color = Color(0.84, 0.88, 0.94, 1)
+Label/font_sizes/font_size = 13
+Button/colors/font_color = Color(0.9, 0.94, 0.98, 1)
+Button/font_sizes/font_size = 13
+LineEdit/colors/font_color = Color(0.9, 0.94, 0.98, 1)
+LineEdit/font_sizes/font_size = 13
+TextEdit/colors/font_color = Color(0.9, 0.94, 0.98, 1)
+TextEdit/font_sizes/font_size = 13
+CheckBox/colors/font_color = Color(0.8, 0.84, 0.9, 1)
+CheckBox/font_sizes/font_size = 12
+ItemList/colors/font_color = Color(0.84, 0.88, 0.94, 1)
+ItemList/font_sizes/font_size = 12
+PopupMenu/font_sizes/font_size = 12

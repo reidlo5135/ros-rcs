@@ -237,8 +237,8 @@ func _add_section_header(parent: Control, text: String, action := Callable()) ->
 
 	var label := Label.new()
 	label.text = text
-	label.add_theme_color_override("font_color", Color(0.56, 0.62, 0.64))
-	label.add_theme_font_size_override("font_size", 11)
+	label.add_theme_color_override("font_color", Color(0.7, 0.76, 0.82))
+	label.add_theme_font_size_override("font_size", 12)
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(label)
 
@@ -251,14 +251,15 @@ func _add_section_header(parent: Control, text: String, action := Callable()) ->
 func _add_field_label(parent: Control, text: String) -> void:
 	var label := Label.new()
 	label.text = text
-	label.add_theme_color_override("font_color", Color(0.62, 0.68, 0.7))
+	label.add_theme_color_override("font_color", Color(0.56, 0.62, 0.7))
+	label.add_theme_font_size_override("font_size", 11)
 	parent.add_child(label)
 
 
 func _add_button(parent: Control, label: String, bg: Color, fg: Color, callback: Callable) -> Button:
 	var button := Button.new()
 	button.text = label
-	button.custom_minimum_size = Vector2(0, 34)
+	button.custom_minimum_size = Vector2(0, 36)
 	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	button.add_theme_stylebox_override("normal", _button_style(bg, bg.lightened(0.18)))
@@ -431,13 +432,13 @@ func _open_topic_settings(group: String) -> void:
 	var title := Label.new()
 	title.text = "Command Topic Settings" if group == "command" else "Visualization Topic Settings"
 	title.add_theme_color_override("font_color", Color(0.86, 0.9, 0.96))
-	title.add_theme_font_size_override("font_size", 15)
+	title.add_theme_font_size_override("font_size", 17)
 	title_column.add_child(title)
 
 	var subtitle := Label.new()
 	subtitle.text = "Edit the command topics used by the operator controls and save them locally." if group == "command" else "Edit the viz topics bound to the Visualization list and save them locally."
 	subtitle.add_theme_color_override("font_color", Color(0.42, 0.49, 0.58))
-	subtitle.add_theme_font_size_override("font_size", 11)
+	subtitle.add_theme_font_size_override("font_size", 12)
 	title_column.add_child(subtitle)
 
 	var close_button := Button.new()

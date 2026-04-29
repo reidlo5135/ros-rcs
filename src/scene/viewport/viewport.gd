@@ -1,6 +1,7 @@
 extends SubViewportContainer
 
 signal waypoint_placed(position: Vector3, yaw: float)
+signal ai_canvas_picked(mode: String, position: Vector3, yaw: float)
 
 const RcsWorld := preload("res://src/scene/world/world.gd")
 
@@ -24,6 +25,9 @@ func _ready() -> void:
 	world = RcsWorld.new()
 	world.waypoint_placed.connect(func(position: Vector3, yaw: float) -> void:
 		waypoint_placed.emit(position, yaw)
+	)
+	world.ai_canvas_picked.connect(func(mode: String, position: Vector3, yaw: float) -> void:
+		ai_canvas_picked.emit(mode, position, yaw)
 	)
 	viewport.add_child(world)
 
@@ -49,6 +53,21 @@ func set_waypoint_placement_enabled(enabled: bool) -> void:
 func clear_waypoints() -> void:
 	if world != null and world.has_method("clear_waypoints"):
 		world.clear_waypoints()
+
+
+func set_ai_canvas_pick_mode(mode: String) -> void:
+	if world != null and world.has_method("set_ai_canvas_pick_mode"):
+		world.set_ai_canvas_pick_mode(mode)
+
+
+func set_ai_preview(preview: Dictionary) -> void:
+	if world != null and world.has_method("set_ai_preview"):
+		world.set_ai_preview(preview)
+
+
+func clear_ai_preview() -> void:
+	if world != null and world.has_method("clear_ai_preview"):
+		world.clear_ai_preview()
 
 
 func set_visualization_layer_visible(layer_id: String, enabled: bool) -> void:

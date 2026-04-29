@@ -20,7 +20,7 @@ class PingWidget:
 	var _style: StyleBoxFlat
 
 	func _ready() -> void:
-		custom_minimum_size = Vector2(96, 22)
+		custom_minimum_size = Vector2(100, 24)
 		_style = StyleBoxFlat.new()
 		_style.bg_color = CHIP_BG
 		_style.border_color = LINE_STRONG
@@ -64,7 +64,7 @@ class PingWidget:
 		var font := ThemeDB.fallback_font
 		var text := "--" if ping_ms < 0.0 else "%.0f ms" % ping_ms
 		var text_color := color if ping_ms >= 0.0 else TEXT_MUTED
-		draw_string(font, Vector2(39.0, size.y - 5.0), text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, text_color)
+		draw_string(font, Vector2(39.0, size.y - 5.0), text, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, text_color)
 
 
 class BatteryWidget:
@@ -74,7 +74,7 @@ class BatteryWidget:
 	var _style: StyleBoxFlat
 
 	func _ready() -> void:
-		custom_minimum_size = Vector2(92, 22)
+		custom_minimum_size = Vector2(96, 24)
 		_style = StyleBoxFlat.new()
 		_style.bg_color = CHIP_BG
 		_style.border_color = LINE_STRONG
@@ -111,7 +111,7 @@ class BatteryWidget:
 		var font := ThemeDB.fallback_font
 		var text := "--%"  if level < 0.0 else "%.0f%%" % (level * 100.0)
 		var text_color := TEXT_MUTED if level < 0.0 else TEXT_PRIMARY
-		draw_string(font, Vector2(pad + bar_w + 10.0, size.y - 5.0), text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, text_color)
+		draw_string(font, Vector2(pad + bar_w + 10.0, size.y - 5.0), text, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, text_color)
 
 var ping_widget = null
 var battery_widget = null
@@ -132,7 +132,7 @@ func _ready() -> void:
 
 
 func _build_ui() -> void:
-	custom_minimum_size = Vector2(0, 32)
+	custom_minimum_size = Vector2(0, 36)
 	add_theme_stylebox_override("panel", _panel_style())
 
 	var accent_strip := ColorRect.new()
@@ -146,18 +146,18 @@ func _build_ui() -> void:
 	var margin := MarginContainer.new()
 	margin.add_theme_constant_override("margin_left", 12)
 	margin.add_theme_constant_override("margin_right", 12)
-	margin.add_theme_constant_override("margin_top", 4)
-	margin.add_theme_constant_override("margin_bottom", 4)
+	margin.add_theme_constant_override("margin_top", 5)
+	margin.add_theme_constant_override("margin_bottom", 5)
 	add_child(margin)
 
 	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 5)
+	row.add_theme_constant_override("separation", 6)
 	margin.add_child(row)
 
 	var title := Label.new()
 	title.text = "RCS"
 	title.add_theme_color_override("font_color", ACCENT_AMBER)
-	title.add_theme_font_size_override("font_size", 12)
+	title.add_theme_font_size_override("font_size", 13)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(title)
 
@@ -184,8 +184,8 @@ func _mode_button(label_text: String, mode: String, group: ButtonGroup) -> Butto
 	button.toggle_mode = true
 	button.flat = true
 	button.button_group = group
-	button.custom_minimum_size = Vector2(78, 18)
-	button.add_theme_font_size_override("font_size", 11)
+	button.custom_minimum_size = Vector2(82, 20)
+	button.add_theme_font_size_override("font_size", 12)
 	button.add_theme_stylebox_override("normal", _tab_button_style())
 	button.add_theme_stylebox_override("hover", _tab_button_style())
 	button.add_theme_stylebox_override("pressed", _tab_button_style())
@@ -199,7 +199,7 @@ func _mode_button(label_text: String, mode: String, group: ButtonGroup) -> Butto
 
 func _mode_tabset(buttons: Array[Button]) -> Panel:
 	var panel := Panel.new()
-	panel.custom_minimum_size = Vector2(159, 22)
+	panel.custom_minimum_size = Vector2(167, 24)
 	panel.add_theme_stylebox_override("panel", _tabset_style())
 	mode_tabset_panel = panel
 	panel.clip_contents = true
@@ -207,7 +207,7 @@ func _mode_tabset(buttons: Array[Button]) -> Panel:
 	mode_indicator = Panel.new()
 	mode_indicator.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	mode_indicator.position = Vector2.ONE
-	mode_indicator.size = Vector2(78, 18)
+	mode_indicator.size = Vector2(82, 20)
 	panel.add_child(mode_indicator)
 
 	var row := HBoxContainer.new()
@@ -270,11 +270,11 @@ func _move_mode_indicator(button: Button, accent: Color, bg: Color, animated: bo
 func _chip(text: String, min_width: float) -> Label:
 	var label := Label.new()
 	label.text = text
-	label.custom_minimum_size = Vector2(min_width, 22)
+	label.custom_minimum_size = Vector2(min_width, 24)
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	label.add_theme_color_override("font_color", TEXT_MUTED)
-	label.add_theme_font_size_override("font_size", 11)
+	label.add_theme_font_size_override("font_size", 12)
 	label.add_theme_stylebox_override("normal", _chip_style())
 	return label
 
