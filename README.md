@@ -1,5 +1,8 @@
 # RCS Godot
 
+![image](docs/introduction/introduction_manual.png)
+![image](docs/introduction/introduction_ai.png)
+
 RCS is moving from a shared Web/Electron operator console to a Godot-native robot operation runtime.
 
 Version `0.2.0` resets the product foundation around Godot 4, C++ GDExtension, and a stricter domain model for robot telemetry, commands, simulation, replay, and visualization.

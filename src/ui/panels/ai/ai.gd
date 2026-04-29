@@ -1,5 +1,15 @@
 extends PanelContainer
 
+const PROMPT_CONFIG_PATH := "res://assets/ai/prompt.json"
+const DEFAULT_PROMPT_SECTION_LABEL := "推荐 Prompt"
+const DEFAULT_PROMPTS := [
+	"현재 활성 로봇의 상태를 한눈에 요약해 줘. 연결 상태, 배터리, 경로 진행 상황, 장애물 징후를 같이 알려줘.",
+	"burger1을 map 기준 x=-1.25, y=0.40으로 보내고 필요한 확인 절차를 함께 정리해 줘.",
+	"burger1을 충전 스테이션으로 복귀시키려면 운영자가 어떤 순서로 확인하고 명령해야 하는지 단계별로 설명해 줘.",
+	"현재 경로가 막혔을 때 점검해야 할 원인과 복구 절차를 우선순위대로 제안해 줘.",
+	"burger1 목표를 map 기준 x=2.00, y=-0.75, yaw=1.57로 설정하는 명령을 만들어 줘.",
+]
+
 class GearButton:
 	extends Control
 
@@ -171,20 +181,16 @@ func _build_ui() -> void:
 		provider_buttons[provider] = chip
 		providers_row.add_child(chip)
 
+	var prompt_config := _load_prompt_config()
 	prompt_section_label = Label.new()
-	prompt_section_label.text = "추천 프롬프트"
+	prompt_section_label.text = str(prompt_config.get("prompt_section_label", DEFAULT_PROMPT_SECTION_LABEL))
 	prompt_section_label.add_theme_color_override("font_color", Color(0.42, 0.49, 0.58))
 	prompt_section_label.add_theme_font_size_override("font_size", 10)
 	column.add_child(prompt_section_label)
-	var prompts := [
-		"현재 활성 로봇의 상태를 한눈에 요약해 줘. 연결 상태, 배터리, 경로 진행 상황, 장애물 징후를 같이 알려줘.",
-		"burger1을 map 기준 x=-1.25, y=0.40으로 보내고 필요한 확인 절차를 함께 정리해 줘.",
-		"burger1을 충전 스테이션으로 복귀시키려면 운영자가 어떤 순서로 확인하고 명령해야 하는지 단계별로 설명해 줘.",
-		"현재 경로가 막혔을 때 점검해야 할 원인과 복구 절차를 우선순위대로 제안해 줘.",
-		"burger1 목표를 map 기준 x=2.00, y=-0.75, yaw=1.57로 설정하는 명령을 만들어 줘.",
-	]
+	var prompts: Array = prompt_config.get("prompts", DEFAULT_PROMPTS)
 	for prompt in prompts:
-		column.add_child(_prompt_button(prompt))
+		if typeof(prompt) == TYPE_STRING and not str(prompt).strip_edges().is_empty():
+			column.add_child(_prompt_button(str(prompt)))
 
 	transcript_scroll = ScrollContainer.new()
 	transcript_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -436,6 +442,41 @@ func _prompt_button(text: String) -> Button:
 		input.grab_focus()
 	)
 	return button
+
+
+func _load_prompt_config() -> Dictionary:
+	var fallback := {
+		"prompt_section_label": DEFAULT_PROMPT_SECTION_LABEL,
+		"prompts": DEFAULT_PROMPTS.duplicate(),
+	}
+	if not FileAccess.file_exists(PROMPT_CONFIG_PATH):
+		return fallback
+	var file := FileAccess.open(PROMPT_CONFIG_PATH, FileAccess.READ)
+	if file == null:
+		return fallback
+	var json := JSON.new()
+	if json.parse(file.get_as_text()) != OK:
+		return fallback
+	if typeof(json.data) != TYPE_DICTIONARY:
+		return fallback
+	var data: Dictionary = json.data
+	var prompt_config := fallback.duplicate(true)
+	var section_label := str(data.get("prompt_section_label", "")).strip_edges()
+	if not section_label.is_empty():
+		prompt_config["prompt_section_label"] = section_label
+	var prompts_value: Variant = data.get("prompts", [])
+	if typeof(prompts_value) == TYPE_ARRAY:
+		var cleaned_prompts: Array = []
+		for prompt in prompts_value:
+			if typeof(prompt) != TYPE_STRING:
+				continue
+			var text := str(prompt).strip_edges()
+			if text.is_empty():
+				continue
+			cleaned_prompts.append(text)
+		if not cleaned_prompts.is_empty():
+			prompt_config["prompts"] = cleaned_prompts
+	return prompt_config
 
 
 func _add_message(text: String, role := "assistant", badge_override := "") -> void:
