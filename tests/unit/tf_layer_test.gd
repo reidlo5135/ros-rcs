@@ -46,8 +46,8 @@ func _run() -> void:
 		"tf": {
 			"transforms": [
 				{
-					"header": {"frame_id": "base_footprint"},
-					"child_frame_id": "base_link",
+					"parent_frame_id": "base_footprint",
+					"child_frame": "base_link",
 					"translation": {"x": 0.0, "y": 0.0, "z": 0.0},
 					"rotation": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
 				},
@@ -59,6 +59,12 @@ func _run() -> void:
 	var frame_root := layer.get_node_or_null("TfFrames")
 	if frame_root == null or not frame_root.has_node("map") or not frame_root.has_node("odom") or not frame_root.has_node("base_footprint") or not frame_root.has_node("base_link"):
 		push_error("TF layer did not preserve incremental map -> odom -> base_footprint -> base_link frames")
+		layer.queue_free()
+		quit(1)
+		return
+
+	if not layer.has_method("frame_transform") or typeof(layer.frame_transform("base_link")) != TYPE_TRANSFORM3D:
+		push_error("TF layer did not expose resolved base_link transform")
 		layer.queue_free()
 		quit(1)
 		return

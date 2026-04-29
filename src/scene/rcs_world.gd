@@ -4,6 +4,7 @@ signal waypoint_placed(position: Vector3, yaw: float)
 
 const MapLayerScript: Script = preload("res://src/scene/layers/map_layer.gd")
 const RobotLayerScript: Script = preload("res://src/scene/layers/robot_layer.gd")
+const ScanLayerScript: Script = preload("res://src/scene/layers/scan_layer.gd")
 const TfLayerScript: Script = preload("res://src/scene/layers/tf_layer.gd")
 
 const GRID_SIZE := 24
@@ -27,6 +28,7 @@ var global_path_layer: MeshInstance3D
 var local_path_layer: MeshInstance3D
 var robot_layer: Node3D
 var tf_layer: Node3D
+var scan_layer: Node3D
 var camera_target := Vector3.ZERO
 var camera_yaw := 0.0
 var camera_pitch := deg_to_rad(-90.0)
@@ -153,6 +155,11 @@ func _build_layers() -> void:
 	tf_layer.name = "TfLayer"
 	add_child(tf_layer)
 
+	scan_layer = ScanLayerScript.new()
+	scan_layer.name = "ScanLayer"
+	scan_layer.tf_provider = tf_layer
+	add_child(scan_layer)
+
 
 func _build_waypoint_layer() -> void:
 	waypoint_root = Node3D.new()
@@ -197,6 +204,8 @@ func _apply_active_state() -> void:
 		_update_robot_camera_reference(state.robot_pose)
 	if tf_layer != null and tf_layer.has_method("apply_state"):
 		tf_layer.apply_state(state)
+	if scan_layer != null and scan_layer.has_method("apply_state"):
+		scan_layer.apply_state(state)
 	_update_camera()
 
 
@@ -222,6 +231,8 @@ func _apply_patch_state(patch: Dictionary) -> void:
 		_update_robot_camera_reference(state.robot_pose)
 	if _patch_touches_tf(patch) and tf_layer != null and tf_layer.has_method("apply_state"):
 		tf_layer.apply_state(state)
+	if _patch_touches_scan(patch) and scan_layer != null and scan_layer.has_method("apply_state"):
+		scan_layer.apply_state(state)
 	if _patch_touches_robot(patch):
 		_update_camera()
 
@@ -235,6 +246,13 @@ func _patch_touches_robot(patch: Dictionary) -> bool:
 
 func _patch_touches_tf(patch: Dictionary) -> bool:
 	for key in ["tf", "tf_static", "robot_pose", "urdf_model", "robot_description"]:
+		if patch.has(key):
+			return true
+	return false
+
+
+func _patch_touches_scan(patch: Dictionary) -> bool:
+	for key in ["scan", "tf", "tf_static", "robot_pose"]:
 		if patch.has(key):
 			return true
 	return false
@@ -293,6 +311,9 @@ func set_visualization_layer_visible(layer_id: String, enabled: bool) -> void:
 		"tf":
 			if tf_layer != null:
 				tf_layer.visible = enabled
+		"scan":
+			if scan_layer != null:
+				scan_layer.visible = enabled
 		"waypoints":
 			if waypoint_root != null:
 				waypoint_root.visible = enabled

@@ -27,3 +27,9 @@ MQTT payload -> parser -> RCS domain model -> scene/UI binding
 ```
 
 This is the main stability boundary for the Godot migration.
+
+## Native Migration
+
+Performance-sensitive GDScript paths should move into `native/rcs_core`
+incrementally. The current priority list is maintained in
+[`cpp-migration-priorities.md`](cpp-migration-priorities.md).

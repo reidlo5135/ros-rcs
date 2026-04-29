@@ -14,10 +14,16 @@ var origin_marker: Node3D
 var border_mesh: MeshInstance3D
 var last_signature := ""
 var last_rebuild_msec := 0
+var native_occupancy_codec: Object = null
 
 
 func _init() -> void:
 	layer_id = "map"
+
+
+func _ready() -> void:
+	if ClassDB.class_exists("RcsOccupancyCodec"):
+		native_occupancy_codec = ClassDB.instantiate("RcsOccupancyCodec")
 
 
 func apply_state(_state: Variant) -> void:
@@ -95,6 +101,17 @@ func _rebuild_grid(grid: Dictionary) -> void:
 
 func _build_occupancy_texture(grid: Dictionary, width: int, height: int) -> ImageTexture:
 	var data := _grid_data(grid)
+	var bytes := _build_rgba_bytes(data, width, height)
+	var image := Image.create_from_data(width, height, false, Image.FORMAT_RGBA8, bytes)
+	return ImageTexture.create_from_image(image)
+
+
+func _build_rgba_bytes(data: Array, width: int, height: int) -> PackedByteArray:
+	if native_occupancy_codec != null and native_occupancy_codec.has_method("build_rgba"):
+		var native_bytes: Variant = native_occupancy_codec.call("build_rgba", data, width, height, palette)
+		if typeof(native_bytes) == TYPE_PACKED_BYTE_ARRAY and (native_bytes as PackedByteArray).size() == width * height * 4:
+			return native_bytes
+
 	var bytes := PackedByteArray()
 	bytes.resize(width * height * 4)
 	for row in range(height):
@@ -110,9 +127,7 @@ func _build_occupancy_texture(grid: Dictionary, width: int, height: int) -> Imag
 			bytes[target_index + 1] = color[1]
 			bytes[target_index + 2] = color[2]
 			bytes[target_index + 3] = color[3]
-
-	var image := Image.create_from_data(width, height, false, Image.FORMAT_RGBA8, bytes)
-	return ImageTexture.create_from_image(image)
+	return bytes
 
 
 func _build_origin_marker(origin_position: Dictionary, origin_yaw: float) -> void:

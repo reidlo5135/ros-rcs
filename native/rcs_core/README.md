@@ -12,6 +12,12 @@ The extension owns code that should stay strict and stable:
 - lidar raycast and simulation stepping
 - replay file parsing
 
+The current migration order is tracked in:
+
+```text
+docs/architecture/cpp-migration-priorities.md
+```
+
 ## Dependencies
 
 Place `godot-cpp` at:

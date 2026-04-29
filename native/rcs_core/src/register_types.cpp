@@ -1,6 +1,10 @@
 #include "rcs_core/register_types.hpp"
 
+#include "rcs_core/rcs_laser_scan_projector.hpp"
+#include "rcs_core/rcs_occupancy_codec.hpp"
+#include "rcs_core/rcs_path_projector.hpp"
 #include "rcs_core/rcs_protocol_codec.hpp"
+#include "rcs_core/rcs_tf_resolver.hpp"
 
 #include <godot_cpp/core/defs.hpp>
 #include <godot_cpp/godot.hpp>
@@ -13,6 +17,10 @@ void initialize_rcs_core(ModuleInitializationLevel p_level) {
 	}
 
 	ClassDB::register_class<RcsProtocolCodec>();
+	ClassDB::register_class<RcsOccupancyCodec>();
+	ClassDB::register_class<RcsTfResolver>();
+	ClassDB::register_class<RcsLaserScanProjector>();
+	ClassDB::register_class<RcsPathProjector>();
 }
 
 void uninitialize_rcs_core(ModuleInitializationLevel p_level) {

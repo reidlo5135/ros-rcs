@@ -60,7 +60,7 @@ func _merge_edges_into(store: Dictionary, message: Variant) -> void:
 			continue
 		var transform: Dictionary = transform_value
 		var parent := _parent_frame_id(transform)
-		var child := _normalize_frame_id(str(transform.get("child_frame_id", "")))
+		var child := _child_frame_id(transform)
 		if parent.is_empty() or child.is_empty():
 			continue
 		store[child] = {
@@ -100,7 +100,21 @@ func _transforms_from(message: Variant) -> Array:
 func _parent_frame_id(transform: Dictionary) -> String:
 	var header: Variant = transform.get("header", {})
 	if typeof(header) == TYPE_DICTIONARY:
-		return _normalize_frame_id(str((header as Dictionary).get("frame_id", "")))
+		var header_frame := _normalize_frame_id(str((header as Dictionary).get("frame_id", "")))
+		if not header_frame.is_empty():
+			return header_frame
+	for key in ["parent_frame_id", "parent_frame", "parent", "frame_id", "frame"]:
+		var candidate := _normalize_frame_id(str(transform.get(key, "")))
+		if not candidate.is_empty():
+			return candidate
+	return ""
+
+
+func _child_frame_id(transform: Dictionary) -> String:
+	for key in ["child_frame_id", "child_frame", "child"]:
+		var candidate := _normalize_frame_id(str(transform.get(key, "")))
+		if not candidate.is_empty():
+			return candidate
 	return ""
 
 
@@ -233,6 +247,24 @@ func _rebuild_frames(frames: Dictionary) -> void:
 			_add_frame_axes(str(frame_id), frame_transform)
 
 
+func frame_transform(frame_id: String) -> Variant:
+	var clean := _normalize_frame_id(frame_id)
+	if clean.is_empty():
+		return null
+	if last_frames.has(clean):
+		return last_frames[clean]
+	var alias := _frame_alias(clean)
+	if last_frames.has(alias):
+		return last_frames[alias]
+	if clean == "map":
+		return Transform3D.IDENTITY
+	return null
+
+
+func has_frame(frame_id: String) -> bool:
+	return typeof(frame_transform(frame_id)) == TYPE_TRANSFORM3D
+
+
 func _add_frame_axes(frame_id: String, frame_transform: Transform3D) -> void:
 	var frame := Node3D.new()
 	frame.name = _safe_node_name(frame_id)
@@ -332,6 +364,19 @@ func _parse_triplet(text: String, fallback: Vector3) -> Vector3:
 func _normalize_frame_id(value: String) -> String:
 	var clean := value.strip_edges()
 	return clean.substr(1) if clean.begins_with("/") else clean
+
+
+func _frame_alias(frame_id: String) -> String:
+	var clean := frame_id.strip_edges().to_lower()
+	match clean:
+		"basefootprint":
+			return "base_footprint"
+		"baselink":
+			return "base_link"
+		"basescan":
+			return "base_scan"
+		_:
+			return frame_id
 
 
 func _safe_node_name(value: String) -> String:
