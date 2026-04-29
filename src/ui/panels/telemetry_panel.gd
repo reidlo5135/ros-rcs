@@ -87,7 +87,7 @@ func _build_ui() -> void:
 
 	var column := VBoxContainer.new()
 	column.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	column.add_theme_constant_override("separation", 8)
+	column.add_theme_constant_override("separation", 10)
 	margin.add_child(column)
 
 	_add_section_header(column, "NAVIGATION STATUS")
@@ -135,21 +135,21 @@ func _build_ui() -> void:
 func _add_status_row(parent: Control, key_text: String, value_text: String) -> Label:
 	var key := Label.new()
 	key.text = key_text
-	key.add_theme_color_override("font_color", Color(0.42, 0.49, 0.58))
+	key.add_theme_color_override("font_color", Color(0.58, 0.64, 0.66))
 	parent.add_child(key)
 
 	var value := Label.new()
 	value.text = value_text
 	value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	value.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	value.add_theme_color_override("font_color", Color(0.82, 0.88, 0.96))
+	value.add_theme_color_override("font_color", Color(0.9, 0.94, 0.95))
 	parent.add_child(value)
 	return value
 
 
 func _sync_connection_state(next_state: String) -> void:
 	if connection_value != null:
-		connection_value.text = next_state if last_ping_ms < 0.0 else "%s | %.0f ms" % [next_state, last_ping_ms]
+		connection_value.text = _connection_label(next_state)
 
 
 func _on_event_pushed(entry: Dictionary) -> void:
@@ -170,8 +170,8 @@ func _add_event_item(entry: Dictionary) -> void:
 func _add_section_header(parent: Control, text: String) -> void:
 	var label := Label.new()
 	label.text = text
-	label.add_theme_color_override("font_color", Color(0.42, 0.49, 0.58))
-	label.add_theme_font_size_override("font_size", 10)
+	label.add_theme_color_override("font_color", Color(0.56, 0.62, 0.64))
+	label.add_theme_font_size_override("font_size", 11)
 	parent.add_child(label)
 
 
@@ -279,9 +279,32 @@ func _apply_navigation_result(payload: Dictionary) -> void:
 func _apply_system_result(payload: Dictionary) -> void:
 	if payload.is_empty():
 		return
-	if payload.has("bridge_time_ms"):
-		last_ping_ms = float(payload.get("bridge_time_ms", -1.0))
+	var next_ping_ms := _extract_ping_ms(payload)
+	if next_ping_ms >= 0.0:
+		last_ping_ms = next_ping_ms
 		_sync_connection_state(AppState.connection_state)
+
+
+func _connection_label(next_state: String) -> String:
+	if next_state != "Connected" or last_ping_ms < 0.0:
+		return next_state
+	return "%s | %.0f ms" % [next_state, last_ping_ms]
+
+
+func _extract_ping_ms(payload: Dictionary) -> float:
+	for key in ["ping_ms", "latency_ms", "rtt_ms"]:
+		if payload.has(key):
+			return maxf(0.0, float(payload.get(key, -1.0)))
+	if payload.has("sent_at_ms"):
+		var sent_at_ms := float(payload.get("sent_at_ms", -1.0))
+		if sent_at_ms > 0.0:
+			var now_ms := float(Time.get_unix_time_from_system() * 1000.0)
+			return maxf(0.0, now_ms - sent_at_ms)
+	if payload.has("bridge_time_ms"):
+		var bridge_time_ms := float(payload.get("bridge_time_ms", -1.0))
+		if bridge_time_ms >= 0.0 and bridge_time_ms < 600000.0:
+			return bridge_time_ms
+	return -1.0
 
 
 func _blocked_source_from_motion_status(payload: Dictionary) -> String:
@@ -324,15 +347,23 @@ func _separator() -> HSeparator:
 
 func _panel_style() -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.045, 0.055, 0.068)
-	style.border_color = Color(0.16, 0.19, 0.24)
+	style.bg_color = Color(0.055, 0.058, 0.06)
+	style.border_color = Color(0.2, 0.24, 0.23)
 	style.set_border_width_all(1)
+	style.corner_radius_top_left = 8
+	style.corner_radius_top_right = 8
+	style.corner_radius_bottom_left = 8
+	style.corner_radius_bottom_right = 8
 	return style
 
 
 func _box_style() -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.032, 0.039, 0.049)
-	style.border_color = Color(0.14, 0.17, 0.22)
+	style.bg_color = Color(0.038, 0.041, 0.043)
+	style.border_color = Color(0.17, 0.22, 0.21)
 	style.set_border_width_all(1)
+	style.corner_radius_top_left = 6
+	style.corner_radius_top_right = 6
+	style.corner_radius_bottom_left = 6
+	style.corner_radius_bottom_right = 6
 	return style

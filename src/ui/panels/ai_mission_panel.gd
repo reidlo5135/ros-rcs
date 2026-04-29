@@ -37,7 +37,7 @@ class GearButton:
 		draw_circle(center, 2.3, color)
 
 
-signal prompt_submitted(message: String)
+signal prompt_submitted(message: String, submission: Dictionary)
 signal connect_requested(broker_url: String, robot_id: String)
 signal disconnect_requested()
 
@@ -47,6 +47,8 @@ var transcript_margin: MarginContainer
 var transcript: VBoxContainer
 var send_button: Button
 var chat_status_label: Label
+var summary_label: Label
+var helper_label: Label
 var provider_buttons: Dictionary = {}
 var current_provider := "ChatGPT"
 var last_navigation_status_keys: Dictionary = {}
@@ -69,7 +71,11 @@ var ws_connected := false
 func _ready() -> void:
 	mqtt_robot_id = AppState.active_robot_id
 	_build_ui()
+	AppState.connection_state_changed.connect(_on_transport_state_changed)
+	SessionRegistry.active_session_changed.connect(_on_active_session_changed)
 	resized.connect(_refresh_transcript_width)
+	_refresh_context_labels()
+	_refresh_send_state()
 	call_deferred("_refresh_transcript_width")
 
 
@@ -110,14 +116,24 @@ func _build_ui() -> void:
 	margin.add_child(column)
 
 	var header := HBoxContainer.new()
-	header.add_theme_constant_override("separation", 8)
+	header.add_theme_constant_override("separation", 10)
 	column.add_child(header)
+
+	var title_column := VBoxContainer.new()
+	title_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title_column.add_theme_constant_override("separation", 4)
+	header.add_child(title_column)
 
 	var title := Label.new()
 	title.text = "AI MISSION CONTROL"
 	title.add_theme_color_override("font_color", Color(0.85, 0.9, 0.98))
-	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	header.add_child(title)
+	title.add_theme_font_size_override("font_size", 18)
+	title_column.add_child(title)
+
+	summary_label = Label.new()
+	summary_label.add_theme_color_override("font_color", Color(0.62, 0.69, 0.71))
+	summary_label.add_theme_font_size_override("font_size", 11)
+	title_column.add_child(summary_label)
 
 	chat_status_label = Label.new()
 	chat_status_label.text = "OFFLINE"
@@ -128,8 +144,18 @@ func _build_ui() -> void:
 	chat_status_label.add_theme_stylebox_override("normal", _pill_style(Color(0.02, 0.025, 0.03), Color(0.25, 0.31, 0.38)))
 	header.add_child(chat_status_label)
 
+	var clear_button := Button.new()
+	clear_button.text = "Clear"
+	clear_button.flat = true
+	clear_button.custom_minimum_size = Vector2(54, 24)
+	clear_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	clear_button.add_theme_color_override("font_color", Color(0.58, 0.66, 0.78))
+	clear_button.add_theme_color_override("font_hover_color", Color(0.86, 0.92, 1.0))
+	clear_button.pressed.connect(_clear_transcript)
+	header.add_child(clear_button)
+
 	var gear := GearButton.new()
-	gear.pressed.connect(_open_connection_settings)
+	gear.pressed.connect(_open_connection_settings_dialog)
 	header.add_child(gear)
 
 	var providers_row := HBoxContainer.new()
@@ -142,13 +168,13 @@ func _build_ui() -> void:
 		provider_buttons[provider] = chip
 		providers_row.add_child(chip)
 
-	_add_section_header(column, "QUICK PROMPTS")
+	_add_section_header(column, "추천 프롬프트")
 	var prompts := [
-		"Summarize the full AMR fleet state.",
-		"Send burger1 to x=-1.25, y=0.40 in map.",
-		"Explain the procedure for returning burger1 to the charging station.",
-		"Suggest a recovery path if the current route is blocked.",
-		"Send burger1 goal x=2.00, y=-0.75, yaw=1.57 in map.",
+		"현재 활성 로봇의 상태를 한눈에 요약해 줘. 연결 상태, 배터리, 경로 진행 상황, 장애물 징후를 같이 알려줘.",
+		"burger1을 map 기준 x=-1.25, y=0.40으로 보내고 필요한 확인 절차를 함께 정리해 줘.",
+		"burger1을 충전 스테이션으로 복귀시키려면 운영자가 어떤 순서로 확인하고 명령해야 하는지 단계별로 설명해 줘.",
+		"현재 경로가 막혔을 때 점검해야 할 원인과 복구 절차를 우선순위대로 제안해 줘.",
+		"burger1 목표를 map 기준 x=2.00, y=-0.75, yaw=1.57로 설정하는 명령을 만들어 줘.",
 	]
 	for prompt in prompts:
 		column.add_child(_prompt_button(prompt))
@@ -171,11 +197,11 @@ func _build_ui() -> void:
 	transcript.add_theme_constant_override("separation", 14)
 	transcript.resized.connect(_on_transcript_resized)
 	transcript_margin.add_child(transcript)
-	_add_message("RCS routes natural-language commands through RMS chat and shows navigation lifecycle events in one timeline.", "system", "SYS")
+	_add_message("자연어 프롬프트는 MCP_SERVER WebSocket으로 전달되고, 내비게이션 진행 상황은 이 타임라인에 계속 쌓입니다.", "system", "SYS")
 
 	input = TextEdit.new()
-	input.placeholder_text = "Message %s..." % current_provider
-	input.custom_minimum_size = Vector2(0, 72)
+	input.placeholder_text = "활성 로봇에 대해 %s에게 지시하거나 질문하세요..." % current_provider
+	input.custom_minimum_size = Vector2(0, 92)
 	input.add_theme_stylebox_override("normal", _input_style())
 	input.gui_input.connect(_on_input_gui_input)
 	column.add_child(input)
@@ -184,17 +210,20 @@ func _build_ui() -> void:
 	footer.add_theme_constant_override("separation", 8)
 	column.add_child(footer)
 
-	var hint := Label.new()
-	hint.text = "Ctrl+Enter to send"
-	hint.add_theme_color_override("font_color", Color(0.45, 0.52, 0.62))
-	hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	footer.add_child(hint)
+	helper_label = Label.new()
+	helper_label.add_theme_color_override("font_color", Color(0.62, 0.69, 0.71))
+	helper_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	footer.add_child(helper_label)
 
 	send_button = Button.new()
-	send_button.text = "Send to %s" % current_provider
-	send_button.custom_minimum_size = Vector2(140, 32)
-	send_button.add_theme_stylebox_override("normal", _button_style(Color(0.16, 0.19, 0.24), Color(0.25, 0.3, 0.38)))
-	send_button.add_theme_color_override("font_color", Color(0.72, 0.78, 0.86))
+	send_button.text = "MCP_SERVER로 전송"
+	send_button.custom_minimum_size = Vector2(170, 36)
+	send_button.add_theme_stylebox_override("normal", _button_style(Color(0.08, 0.24, 0.43), Color(0.26, 0.54, 0.88)))
+	send_button.add_theme_stylebox_override("hover", _button_style(Color(0.1, 0.28, 0.48), Color(0.34, 0.62, 0.96)))
+	send_button.add_theme_stylebox_override("pressed", _button_style(Color(0.07, 0.2, 0.36), Color(0.22, 0.46, 0.78)))
+	send_button.add_theme_stylebox_override("disabled", _button_style(Color(0.08, 0.1, 0.14), Color(0.18, 0.22, 0.3)))
+	send_button.add_theme_color_override("font_color", Color(0.92, 0.97, 1.0))
+	send_button.add_theme_color_override("font_disabled_color", Color(0.43, 0.5, 0.6))
 	send_button.pressed.connect(_submit_prompt)
 	footer.add_child(send_button)
 	_set_provider(current_provider)
@@ -216,10 +245,8 @@ func _provider_chip(text: String, active: bool, group: ButtonGroup) -> Button:
 
 func _set_provider(provider: String) -> void:
 	current_provider = provider
-	if send_button != null:
-		send_button.text = "Send to %s" % provider
 	if input != null:
-		input.placeholder_text = "Message %s..." % provider
+		input.placeholder_text = "활성 로봇에 대해 %s에게 지시하거나 질문하세요..." % provider
 	for key in provider_buttons.keys():
 		var button_value: Variant = provider_buttons[key]
 		if typeof(button_value) != TYPE_OBJECT:
@@ -230,6 +257,7 @@ func _set_provider(provider: String) -> void:
 		var active := str(key) == current_provider
 		button.button_pressed = active
 		_apply_provider_button_state(button, active)
+	_refresh_context_labels()
 
 
 func _apply_provider_button_state(button: Button, active: bool) -> void:
@@ -279,7 +307,7 @@ func _add_message(text: String, role := "assistant", badge_override := "") -> vo
 		meta_row.add_child(meta_spacer)
 
 	var time_label := Label.new()
-	time_label.text = _message_timestamp()
+	time_label.text = _message_timestamp_display()
 	time_label.add_theme_color_override("font_color", Color(0.4, 0.46, 0.56))
 	time_label.add_theme_font_size_override("font_size", 10)
 	meta_row.add_child(time_label)
@@ -326,7 +354,7 @@ func _add_message(text: String, role := "assistant", badge_override := "") -> vo
 	bubble.add_child(bubble_margin)
 
 	var bubble_label := Label.new()
-	bubble_label.text = text
+	bubble_label.text = _sanitize_ui_text(text)
 	bubble_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	bubble_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bubble_label.add_theme_color_override("font_color", palette["text"])
@@ -384,9 +412,11 @@ func _provider_id() -> String:
 			return "chatgpt"
 
 
-func _chat_request_payload(message: String) -> Dictionary:
-	return {
+func _chat_request_payload(message: String, parsed_command := {}) -> Dictionary:
+	var payload := {
 		"type": "chat.request",
+		"target": "MCP_SERVER",
+		"transport": "websocket",
 		"provider": _provider_id(),
 		"provider_label": current_provider,
 		"robot_id": AppState.active_robot_id,
@@ -400,6 +430,14 @@ func _chat_request_payload(message: String) -> Dictionary:
 		},
 		"timestamp": Time.get_datetime_string_from_system(true, true),
 	}
+	if typeof(parsed_command) == TYPE_DICTIONARY and not (parsed_command as Dictionary).is_empty():
+		var structured_command: Dictionary = parsed_command
+		payload["parsed_command"] = structured_command
+		payload["intent"] = str(structured_command.get("kind", "navigation_pose"))
+		var command_payload_value: Variant = structured_command.get("payload", {})
+		if typeof(command_payload_value) == TYPE_DICTIONARY:
+			payload["request_id"] = str((command_payload_value as Dictionary).get("request_id", "")).strip_edges()
+	return payload
 
 
 func _submit_prompt() -> void:
@@ -407,11 +445,65 @@ func _submit_prompt() -> void:
 	if message.is_empty():
 		return
 	_add_message(message, "user", current_provider.left(3).to_upper())
+	if ws_peer == null or ws_peer.get_ready_state() != WebSocketPeer.STATE_OPEN:
+		_add_message("MCP_SERVER WebSocket is offline. Reconnect the server and send again.", "system", "SYS")
+		AppState.push_event("AI prompt blocked: MCP_SERVER offline")
+		return
+
+	var parsed_command := _structured_command_from_prompt(message)
+	var submission := _chat_request_payload(message, parsed_command)
+	var send_error := ws_peer.send_text(JSON.stringify(submission))
+	if send_error != OK:
+		_add_message("Failed to send prompt to MCP_SERVER: %s" % error_string(send_error), "system", "SYS")
+		AppState.push_event("AI prompt send failed: %s" % error_string(send_error))
+		return
+
 	input.text = ""
-	var local_command: Dictionary = RcsAiPromptParser.parse(message, AppState.active_robot_id)
-	if local_command.is_empty() and ws_peer != null and ws_peer.get_ready_state() == WebSocketPeer.STATE_OPEN:
-		ws_peer.send_text(JSON.stringify(_chat_request_payload(message)))
-	prompt_submitted.emit(message)
+	_refresh_send_state()
+	prompt_submitted.emit(message, submission)
+
+
+func _structured_command_from_prompt(message: String) -> Dictionary:
+	var parsed := RcsAiPromptParser.parse(message, AppState.active_robot_id)
+	if parsed.is_empty() or str(parsed.get("kind", "")) != "navigation_pose":
+		return {}
+
+	var robot_id := str(parsed.get("robot_id", AppState.active_robot_id)).strip_edges()
+	if robot_id.is_empty():
+		robot_id = AppState.active_robot_id
+	if robot_id.is_empty():
+		robot_id = "burger1"
+
+	var command: Dictionary = RcsCommandFactory.navigate_to_pose(
+		robot_id,
+		float(parsed.get("x", 0.0)),
+		float(parsed.get("y", 0.0)),
+		float(parsed.get("yaw", 0.0))
+	)
+	command["kind"] = str(parsed.get("kind", "navigation_pose"))
+	command["channel"] = "navigation/command"
+	command["robot_id"] = robot_id
+	command["frame"] = str(parsed.get("frame", "map")).strip_edges()
+
+	var payload_value: Variant = command.get("payload", {})
+	if typeof(payload_value) != TYPE_DICTIONARY:
+		return command
+	var payload: Dictionary = payload_value
+	var goal_poses_value: Variant = payload.get("goal_poses", [])
+	if typeof(goal_poses_value) != TYPE_ARRAY or (goal_poses_value as Array).is_empty():
+		command["payload"] = payload
+		return command
+
+	var goal_poses: Array = goal_poses_value
+	var first_pose_value: Variant = goal_poses[0]
+	if typeof(first_pose_value) == TYPE_DICTIONARY:
+		var first_pose: Dictionary = first_pose_value
+		var frame := str(parsed.get("frame", "map")).strip_edges()
+		first_pose["frame"] = frame if not frame.is_empty() else "map"
+		goal_poses[0] = first_pose
+	payload["goal_poses"] = goal_poses
+	command["payload"] = payload
+	return command
 
 
 func begin_navigation_session(robot_id: String, request_id: String) -> void:
@@ -769,12 +861,14 @@ func _set_chat_status(connected: bool) -> void:
 		chat_status_label.text = "OFFLINE"
 		chat_status_label.add_theme_stylebox_override("normal", _pill_style(Color(0.02, 0.025, 0.03), Color(0.25, 0.31, 0.38)))
 		chat_status_label.add_theme_color_override("font_color", Color.WHITE)
+	_refresh_context_labels()
+	_refresh_send_state()
 
 
 func _connect_chat(endpoint: String) -> void:
 	mcp_endpoint = endpoint.strip_edges()
 	if mcp_endpoint.is_empty():
-		AppState.push_event("MCP WS endpoint is empty")
+		AppState.push_event("MCP_SERVER WS endpoint is empty")
 		return
 	if ws_peer != null:
 		ws_peer.close()
@@ -783,11 +877,12 @@ func _connect_chat(endpoint: String) -> void:
 	ws_peer = WebSocketPeer.new()
 	var error := ws_peer.connect_to_url(mcp_endpoint)
 	if error != OK:
-		AppState.push_event("Chat WS connect failed: %s" % error_string(error))
+		AppState.push_event("MCP_SERVER WS connect failed: %s" % error_string(error))
 		ws_peer = null
 		_set_chat_status(false)
 		return
-	AppState.push_event("MCP WS connecting: %s" % mcp_endpoint)
+	AppState.push_event("MCP_SERVER WS connecting: %s" % mcp_endpoint)
+	_refresh_context_labels()
 
 
 func _disconnect_chat() -> void:
@@ -796,6 +891,7 @@ func _disconnect_chat() -> void:
 		ws_peer = null
 	ws_connected = false
 	_set_chat_status(false)
+	AppState.push_event("MCP_SERVER WS disconnected")
 
 
 func _open_connection_settings() -> void:
@@ -996,13 +1092,13 @@ func _dialog_button(text: String, bg: Color, fg: Color) -> Button:
 
 func _panel_style() -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.028, 0.038, 0.055)
-	style.border_color = Color(0.13, 0.2, 0.3)
+	style.bg_color = Color(0.055, 0.058, 0.06)
+	style.border_color = Color(0.2, 0.24, 0.23)
 	style.set_border_width_all(1)
-	style.corner_radius_top_left = 18
-	style.corner_radius_top_right = 18
-	style.corner_radius_bottom_left = 18
-	style.corner_radius_bottom_right = 18
+	style.corner_radius_top_left = 10
+	style.corner_radius_top_right = 10
+	style.corner_radius_bottom_left = 10
+	style.corner_radius_bottom_right = 10
 	style.shadow_color = Color(0.0, 0.0, 0.0, 0.24)
 	style.shadow_size = 16
 	return style
@@ -1010,13 +1106,13 @@ func _panel_style() -> StyleBoxFlat:
 
 func _box_style() -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.022, 0.03, 0.047)
-	style.border_color = Color(0.12, 0.19, 0.29)
+	style.bg_color = Color(0.038, 0.041, 0.043)
+	style.border_color = Color(0.18, 0.23, 0.22)
 	style.set_border_width_all(1)
-	style.corner_radius_top_left = 16
-	style.corner_radius_top_right = 16
-	style.corner_radius_bottom_left = 16
-	style.corner_radius_bottom_right = 16
+	style.corner_radius_top_left = 8
+	style.corner_radius_top_right = 8
+	style.corner_radius_bottom_left = 8
+	style.corner_radius_bottom_right = 8
 	style.shadow_color = Color(0.0, 0.0, 0.0, 0.18)
 	style.shadow_size = 10
 	return style
@@ -1024,13 +1120,13 @@ func _box_style() -> StyleBoxFlat:
 
 func _input_style() -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.036, 0.05, 0.075)
-	style.border_color = Color(0.16, 0.28, 0.42)
+	style.bg_color = Color(0.039, 0.043, 0.045)
+	style.border_color = Color(0.22, 0.29, 0.27)
 	style.set_border_width_all(1)
-	style.corner_radius_top_left = 14
-	style.corner_radius_top_right = 14
-	style.corner_radius_bottom_left = 14
-	style.corner_radius_bottom_right = 14
+	style.corner_radius_top_left = 8
+	style.corner_radius_top_right = 8
+	style.corner_radius_bottom_left = 8
+	style.corner_radius_bottom_right = 8
 	style.content_margin_left = 10
 	style.content_margin_right = 10
 	style.content_margin_top = 8
@@ -1043,10 +1139,10 @@ func _button_style(bg: Color, border: Color) -> StyleBoxFlat:
 	style.bg_color = bg
 	style.border_color = border
 	style.set_border_width_all(1)
-	style.corner_radius_top_left = 3
-	style.corner_radius_top_right = 3
-	style.corner_radius_bottom_left = 3
-	style.corner_radius_bottom_right = 3
+	style.corner_radius_top_left = 6
+	style.corner_radius_top_right = 6
+	style.corner_radius_bottom_left = 6
+	style.corner_radius_bottom_right = 6
 	style.content_margin_left = 10
 	style.content_margin_right = 10
 	return style
@@ -1062,3 +1158,235 @@ func _pill_style(bg: Color, border: Color, radius := 8) -> StyleBoxFlat:
 	style.corner_radius_bottom_left = radius
 	style.corner_radius_bottom_right = radius
 	return style
+
+
+func _open_connection_settings_dialog() -> void:
+	if connection_popup != null:
+		connection_popup.queue_free()
+
+	connection_popup = PopupPanel.new()
+	connection_popup.exclusive = true
+	connection_popup.add_theme_stylebox_override("panel", _panel_style())
+	add_child(connection_popup)
+
+	var root := VBoxContainer.new()
+	root.add_theme_constant_override("separation", 0)
+	connection_popup.add_child(root)
+
+	var header_margin := MarginContainer.new()
+	header_margin.add_theme_constant_override("margin_left", 16)
+	header_margin.add_theme_constant_override("margin_right", 12)
+	header_margin.add_theme_constant_override("margin_top", 14)
+	header_margin.add_theme_constant_override("margin_bottom", 12)
+	root.add_child(header_margin)
+
+	var header_row := HBoxContainer.new()
+	header_row.add_theme_constant_override("separation", 10)
+	header_margin.add_child(header_row)
+
+	var title_col := VBoxContainer.new()
+	title_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title_col.add_theme_constant_override("separation", 4)
+	header_row.add_child(title_col)
+
+	var title := Label.new()
+	title.text = "Connection Settings"
+	title.add_theme_color_override("font_color", Color(0.94, 0.96, 0.98))
+	title.add_theme_font_size_override("font_size", 15)
+	title_col.add_child(title)
+
+	var subtitle := Label.new()
+	subtitle.text = "MCP_SERVER WebSocket과 MQTT 연결을 한 곳에서 관리합니다."
+	subtitle.add_theme_color_override("font_color", Color(0.56, 0.64, 0.68))
+	subtitle.add_theme_font_size_override("font_size", 11)
+	title_col.add_child(subtitle)
+
+	var close_btn := Button.new()
+	close_btn.text = "X"
+	close_btn.flat = true
+	close_btn.custom_minimum_size = Vector2(32, 32)
+	close_btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	close_btn.add_theme_color_override("font_color", Color(0.61, 0.68, 0.72))
+	close_btn.pressed.connect(func() -> void: connection_popup.hide())
+	header_row.add_child(close_btn)
+
+	root.add_child(_separator())
+
+	var body_margin := MarginContainer.new()
+	body_margin.add_theme_constant_override("margin_left", 16)
+	body_margin.add_theme_constant_override("margin_right", 16)
+	body_margin.add_theme_constant_override("margin_top", 14)
+	body_margin.add_theme_constant_override("margin_bottom", 16)
+	root.add_child(body_margin)
+
+	var body := VBoxContainer.new()
+	body.add_theme_constant_override("separation", 10)
+	body_margin.add_child(body)
+
+	_add_modal_section_header(body, "MCP SERVER")
+	_add_modal_field_label(body, "Server WebSocket")
+
+	chat_endpoint_input = LineEdit.new()
+	chat_endpoint_input.text = mcp_endpoint
+	chat_endpoint_input.custom_minimum_size = Vector2(528, 30)
+	chat_endpoint_input.add_theme_stylebox_override("normal", _input_style())
+	chat_endpoint_input.add_theme_color_override("font_color", Color(0.9, 0.94, 0.95))
+	body.add_child(chat_endpoint_input)
+
+	var chat_action_row := HBoxContainer.new()
+	chat_action_row.add_theme_constant_override("separation", 8)
+	body.add_child(chat_action_row)
+
+	var chat_status_chip := Label.new()
+	chat_status_chip.text = "ONLINE" if ws_connected else "OFFLINE"
+	chat_status_chip.custom_minimum_size = Vector2(72, 30)
+	chat_status_chip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	chat_status_chip.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	if ws_connected:
+		chat_status_chip.add_theme_color_override("font_color", Color(0.74, 1.0, 0.86))
+		chat_status_chip.add_theme_stylebox_override("normal", _pill_style(Color(0.09, 0.25, 0.18), Color(0.26, 0.7, 0.5)))
+	else:
+		chat_status_chip.add_theme_color_override("font_color", Color(0.92, 0.95, 0.98))
+		chat_status_chip.add_theme_stylebox_override("normal", _pill_style(Color(0.05, 0.06, 0.07), Color(0.22, 0.27, 0.28)))
+	chat_action_row.add_child(chat_status_chip)
+
+	var chat_toggle_btn := _dialog_button(
+		"Disconnect MCP" if ws_connected else "Connect MCP",
+		Color(0.32, 0.12, 0.12) if ws_connected else Color(0.11, 0.29, 0.32),
+		Color(1.0, 0.72, 0.7) if ws_connected else Color(0.75, 0.97, 1.0)
+	)
+	chat_toggle_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	chat_toggle_btn.pressed.connect(func() -> void:
+		mcp_endpoint = chat_endpoint_input.text.strip_edges()
+		if ws_connected:
+			_disconnect_chat()
+		else:
+			_connect_chat(mcp_endpoint)
+		connection_popup.hide()
+	)
+	chat_action_row.add_child(chat_toggle_btn)
+
+	body.add_child(_separator())
+
+	_add_modal_section_header(body, "MQTT")
+	_add_modal_field_label(body, "Broker URL")
+
+	mqtt_broker_input = LineEdit.new()
+	mqtt_broker_input.text = mqtt_broker_url
+	mqtt_broker_input.placeholder_text = "ws://broker:9001/mqtt"
+	mqtt_broker_input.custom_minimum_size = Vector2(528, 30)
+	mqtt_broker_input.add_theme_stylebox_override("normal", _input_style())
+	mqtt_broker_input.add_theme_color_override("font_color", Color(0.9, 0.94, 0.95))
+	body.add_child(mqtt_broker_input)
+
+	_add_modal_field_label(body, "Robot ID")
+
+	mqtt_robot_id_input = LineEdit.new()
+	mqtt_robot_id_input.text = mqtt_robot_id if not mqtt_robot_id.is_empty() else AppState.active_robot_id
+	mqtt_robot_id_input.placeholder_text = "burger1"
+	mqtt_robot_id_input.custom_minimum_size = Vector2(528, 30)
+	mqtt_robot_id_input.add_theme_stylebox_override("normal", _input_style())
+	mqtt_robot_id_input.add_theme_color_override("font_color", Color(0.9, 0.94, 0.95))
+	body.add_child(mqtt_robot_id_input)
+
+	var mqtt_row := HBoxContainer.new()
+	mqtt_row.add_theme_constant_override("separation", 6)
+	body.add_child(mqtt_row)
+
+	var connect_mqtt_btn := _dialog_button("Connect MQTT", Color(0.12, 0.3, 0.2), Color(0.82, 1.0, 0.88))
+	connect_mqtt_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	connect_mqtt_btn.pressed.connect(func() -> void:
+		mqtt_broker_url = mqtt_broker_input.text.strip_edges()
+		mqtt_robot_id = mqtt_robot_id_input.text.strip_edges()
+		connect_requested.emit(mqtt_broker_url, mqtt_robot_id)
+		connection_popup.hide()
+	)
+	mqtt_row.add_child(connect_mqtt_btn)
+
+	var disconnect_mqtt_btn := _dialog_button("Disconnect MQTT", Color(0.3, 0.12, 0.12), Color(1.0, 0.74, 0.72))
+	disconnect_mqtt_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	disconnect_mqtt_btn.pressed.connect(func() -> void:
+		disconnect_requested.emit()
+		connection_popup.hide()
+	)
+	mqtt_row.add_child(disconnect_mqtt_btn)
+
+	connection_popup.popup_centered(Vector2i(560, 460))
+
+
+func _message_timestamp_display() -> String:
+	var now := Time.get_datetime_dict_from_system()
+	return "%02d:%02d:%02d" % [int(now.get("hour", 0)), int(now.get("minute", 0)), int(now.get("second", 0))]
+
+
+func _navigation_status_text(status: int) -> String:
+	match status:
+		1:
+			return "Accepted"
+		2:
+			return "Executing"
+		3:
+			return "Canceling"
+		4:
+			return "Succeeded"
+		5:
+			return "Canceled"
+		6:
+			return "Failed"
+		_:
+			return "Pending"
+
+
+func _sanitize_ui_text(text: String) -> String:
+	var cleaned := text
+	var replacements := {
+		"Natural-language prompts are forwarded to MCP_SERVER over WebSocket, and navigation lifecycle updates stay in this timeline.": "자연어 프롬프트는 MCP_SERVER WebSocket으로 전달되고, 내비게이션 진행 상황은 이 타임라인에 계속 쌓입니다.",
+		"?곹깭": "status",
+		"寃곌낵": "result",
+		"異쒕컻": "Executing",
+		"痍⑥냼 以?": "Canceling",
+		"?깃났": "Succeeded",
+		"痍⑥냼 ?꾨즺": "Canceled",
+		"?ㅽ뙣": "Failed",
+		"?섎씫??": "Accepted",
+		"?湲?": "Pending",
+	}
+	for key in replacements.keys():
+		cleaned = cleaned.replace(key, replacements[key])
+	return cleaned
+
+
+func _clear_transcript() -> void:
+	if transcript == null:
+		return
+	for child in transcript.get_children():
+		child.queue_free()
+	_add_message("자연어 프롬프트는 MCP_SERVER WebSocket으로 전달되고, 내비게이션 진행 상황은 이 타임라인에 계속 쌓입니다.", "system", "SYS")
+
+
+func _refresh_context_labels() -> void:
+	var robot_id := AppState.active_robot_id.strip_edges()
+	if robot_id.is_empty():
+		robot_id = "burger1"
+	mqtt_robot_id = robot_id
+	if summary_label != null:
+		var mcp_status := "MCP online" if ws_connected else "MCP offline"
+		summary_label.text = "Robot %s | MQTT %s | %s | Provider %s" % [robot_id, AppState.connection_state, mcp_status, current_provider]
+	if helper_label != null:
+		if ws_connected:
+			helper_label.text = "Ctrl+Enter로 MCP_SERVER에 바로 전송합니다."
+		else:
+			helper_label.text = "프롬프트를 보내기 전에 MCP_SERVER를 연결하세요."
+
+
+func _refresh_send_state() -> void:
+	if send_button != null:
+		send_button.disabled = not ws_connected
+
+
+func _on_transport_state_changed(_next_state: String) -> void:
+	_refresh_context_labels()
+
+
+func _on_active_session_changed(_session_id: String) -> void:
+	_refresh_context_labels()

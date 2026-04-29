@@ -131,10 +131,10 @@ The immediate target is feature parity with the previous RCS MQTT behavior, not 
 
 # 2026-04-29
 
-1. Reduce `system ping` publish interval to 1 second and fix the missing ping value in the UI.
-2. Improve AI panel chat UI/UX.
-3. Change AI chat command publishing to go to `MCP_SERVER` over WebSocket.
-4. Rewrite the recommended prompts in Korean and improve their content.
-5. Fix the issue where TF frames such as `map -> odom` and `odom -> base_footprint` appear only briefly on first load and then disappear.
-6. Improve the overall UI design including fonts and color palette.
+1. [x] Reduce `system ping` publish interval to 1 second and fix the missing ping value in the UI.
+2. [x] Improve AI panel chat UI/UX.
+3. [x] Change AI chat command publishing to go to `MCP_SERVER` over WebSocket.
+4. [x] Rewrite the recommended prompts in Korean and improve their content.
+5. [x] Fix the issue where TF frames such as `map -> odom` and `odom -> base_footprint` appear only briefly on first load and then disappear.
+6. [x] Improve the overall UI design including fonts and color palette.
 7. List and prioritize C++ migration targets for performance-sensitive paths such as occupancy/costmap texture generation, TF transform resolution, LaserScan/path point generation, URDF mesh/path resolution, and hot MQTT codec/parsing paths.

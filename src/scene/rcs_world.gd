@@ -79,7 +79,7 @@ func _build_floor() -> void:
 	floor_mesh.size = Vector2(GRID_SIZE, GRID_SIZE)
 
 	var material := StandardMaterial3D.new()
-	material.albedo_color = Color(0.08, 0.10, 0.11)
+	material.albedo_color = Color(0.12, 0.125, 0.12)
 	material.roughness = 0.8
 
 	floor_layer = MeshInstance3D.new()
@@ -98,7 +98,7 @@ func _build_floor() -> void:
 func _create_grid_mesh() -> Mesh:
 	var mesh := ImmediateMesh.new()
 	var material := StandardMaterial3D.new()
-	material.albedo_color = Color(0.25, 0.43, 0.46, 0.72)
+	material.albedo_color = Color(0.34, 0.48, 0.44, 0.55)
 	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	material.no_depth_test = true

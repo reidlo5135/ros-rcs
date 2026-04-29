@@ -38,7 +38,7 @@ func _build_runtime() -> void:
 	add_child(transport)
 
 	ping_timer = Timer.new()
-	ping_timer.wait_time = 5.0
+	ping_timer.wait_time = 1.0
 	ping_timer.autostart = false
 	ping_timer.timeout.connect(_on_ping_timer_timeout)
 	add_child(ping_timer)
@@ -51,7 +51,7 @@ func _build_runtime() -> void:
 
 
 func _build_layout() -> void:
-	add_theme_stylebox_override("panel", _panel_style(Color(0.028, 0.034, 0.043), Color(0.028, 0.034, 0.043)))
+	add_theme_stylebox_override("panel", _panel_style(Color(0.042, 0.044, 0.046), Color(0.042, 0.044, 0.046)))
 
 	var root := VBoxContainer.new()
 	root.name = "ConsoleFrame"
@@ -101,7 +101,7 @@ func _build_scene_shell() -> PanelContainer:
 	shell.name = "SceneShell"
 	shell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	shell.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	shell.add_theme_stylebox_override("panel", _panel_style(Color(0.04, 0.048, 0.06), Color(0.16, 0.19, 0.24)))
+	shell.add_theme_stylebox_override("panel", _panel_style(Color(0.058, 0.061, 0.063), Color(0.19, 0.24, 0.23)))
 
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation", 0)
@@ -218,42 +218,25 @@ func _on_layer_visibility_changed(layer_id: String, enabled: bool) -> void:
 		scene_viewport.set_visualization_layer_visible(layer_id, enabled)
 
 
-func _on_ai_prompt_submitted(message: String) -> void:
-	var parsed: Dictionary = RcsAiPromptParser.parse(message, active_robot_id)
-	if not parsed.is_empty() and str(parsed.get("kind", "")) == "navigation_pose":
-		var robot_id := str(parsed.get("robot_id", active_robot_id)).strip_edges()
-		if robot_id.is_empty():
-			robot_id = active_robot_id
-		var command: Dictionary = RcsCommandFactory.navigate_to_pose(
-			robot_id,
-			float(parsed.get("x", 0.0)),
-			float(parsed.get("y", 0.0)),
-			float(parsed.get("yaw", 0.0))
-		)
-		command["channel"] = "navigation/command"
-		var payload: Variant = command.get("payload", {})
-		if typeof(payload) == TYPE_DICTIONARY:
-			var payload_dict: Dictionary = payload
-			var goal_poses_value: Variant = payload_dict.get("goal_poses", [])
-			if typeof(goal_poses_value) == TYPE_ARRAY and not (goal_poses_value as Array).is_empty():
-				var goal_poses: Array = goal_poses_value
-				var first_pose_value: Variant = goal_poses[0]
-				if typeof(first_pose_value) == TYPE_DICTIONARY:
-					var first_pose: Dictionary = first_pose_value
-					var frame := str(parsed.get("frame", "map")).strip_edges()
-					first_pose["frame"] = frame if not frame.is_empty() else "map"
-					goal_poses[0] = first_pose
-					payload_dict["goal_poses"] = goal_poses
-					command["payload"] = payload_dict
-		if ai_mission_panel != null and ai_mission_panel.has_method("begin_navigation_session"):
-			var request_id := ""
-			if typeof(payload) == TYPE_DICTIONARY:
-				request_id = str((payload as Dictionary).get("request_id", "")).strip_edges()
-			ai_mission_panel.begin_navigation_session(robot_id, request_id)
-		_on_command_requested(command)
-		AppState.push_event("AI prompt handled locally as navigation command")
-		return
-	AppState.push_event("AI prompt queued: " + message)
+func _on_ai_prompt_submitted(message: String, submission: Dictionary) -> void:
+	var parsed_value: Variant = submission.get("parsed_command", {})
+	if typeof(parsed_value) == TYPE_DICTIONARY:
+		var parsed_command: Dictionary = parsed_value
+		if str(parsed_command.get("kind", "")) == "navigation_pose" and ai_mission_panel != null and ai_mission_panel.has_method("begin_navigation_session"):
+			var robot_id := str(parsed_command.get("robot_id", active_robot_id)).strip_edges()
+			if robot_id.is_empty():
+				robot_id = active_robot_id
+			ai_mission_panel.begin_navigation_session(robot_id, str(submission.get("request_id", "")).strip_edges())
+
+	var target := str(submission.get("target", "MCP_SERVER")).strip_edges()
+	if target.is_empty():
+		target = "MCP_SERVER"
+	var provider := str(submission.get("provider_label", "")).strip_edges()
+	var summary := _summarize_prompt(message)
+	if provider.is_empty():
+		AppState.push_event("AI prompt sent to %s over WebSocket: %s" % [target, summary])
+	else:
+		AppState.push_event("AI prompt sent to %s via %s: %s" % [target, provider, summary])
 
 
 func _on_transport_connected() -> void:
@@ -423,6 +406,13 @@ func _record_telemetry_log(robot_id: String, patch: Dictionary) -> void:
 	AppState.push_event("Telemetry batch: " + ", ".join(labels))
 
 
+func _summarize_prompt(message: String, max_length := 88) -> String:
+	var clean := message.strip_edges().replace("\n", " ")
+	if clean.length() <= max_length:
+		return clean
+	return clean.substr(0, max_length - 3) + "..."
+
+
 func _push_urdf_event(robot_id: String, urdf_model: Variant) -> void:
 	if typeof(urdf_model) != TYPE_DICTIONARY:
 		return
@@ -446,8 +436,8 @@ func _scene_tab(text: String, active: bool, min_width: float) -> Label:
 	label.text = text
 	label.custom_minimum_size = Vector2(min_width, 32)
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	label.add_theme_color_override("font_color", Color(0.86, 0.91, 0.98) if active else Color(0.42, 0.49, 0.58))
-	label.add_theme_font_size_override("font_size", 10)
+	label.add_theme_color_override("font_color", Color(0.92, 0.95, 0.96) if active else Color(0.56, 0.62, 0.64))
+	label.add_theme_font_size_override("font_size", 11)
 	return label
 
 
@@ -457,10 +447,10 @@ func _scene_tool_button(text: String, callback: Callable) -> Button:
 	button.flat = true
 	button.custom_minimum_size = Vector2(48, 32)
 	button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	button.add_theme_color_override("font_color", Color(0.56, 0.65, 0.78))
-	button.add_theme_color_override("font_hover_color", Color(0.86, 0.93, 1.0))
-	button.add_theme_color_override("font_pressed_color", Color(1.0, 0.65, 0.12))
-	button.add_theme_font_size_override("font_size", 10)
+	button.add_theme_color_override("font_color", Color(0.67, 0.74, 0.76))
+	button.add_theme_color_override("font_hover_color", Color(0.93, 0.96, 0.97))
+	button.add_theme_color_override("font_pressed_color", Color(0.95, 0.74, 0.29))
+	button.add_theme_font_size_override("font_size", 11)
 	button.add_theme_stylebox_override("normal", _tool_button_style(Color(0, 0, 0, 0), Color(0, 0, 0, 0)))
 	button.add_theme_stylebox_override("hover", _tool_button_style(Color(0.07, 0.09, 0.12), Color(0.18, 0.22, 0.28)))
 	button.add_theme_stylebox_override("pressed", _tool_button_style(Color(0.09, 0.11, 0.14), Color(0.28, 0.34, 0.42)))

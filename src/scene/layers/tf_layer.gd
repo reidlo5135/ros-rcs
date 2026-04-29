@@ -7,9 +7,11 @@ class_name RcsTfLayer
 @export var min_rebuild_interval_msec := 250
 
 var frame_root: Node3D
-var edge_store: Dictionary = {}
+var static_edge_store: Dictionary = {}
+var live_edge_store: Dictionary = {}
 var frame_nodes: Dictionary = {}
 var last_rebuild_msec := 0
+var last_frames: Dictionary = {}
 
 
 func _init() -> void:
@@ -31,9 +33,11 @@ func apply_state(_state: Variant) -> void:
 		return
 	last_rebuild_msec = now
 
-	_merge_edges(_state.get("tf_static"))
-	_merge_edges(_state.get("tf"))
-	var edges := edge_store.duplicate(true)
+	_merge_edges_into(static_edge_store, _state.get("tf_static"))
+	_merge_edges_into(live_edge_store, _state.get("tf"))
+	var edges := static_edge_store.duplicate(true)
+	for child_frame in live_edge_store.keys():
+		edges[child_frame] = live_edge_store[child_frame]
 	_merge_urdf_edges(_state.get("urdf_model"), edges)
 
 	var frames := _resolved_frames(edges, _state.get("robot_pose"))
@@ -41,11 +45,15 @@ func apply_state(_state: Variant) -> void:
 		var fallback: Variant = _frame_transform_from_robot_pose(_state.get("robot_pose"))
 		if typeof(fallback) == TYPE_TRANSFORM3D:
 			frames["base_link"] = fallback
+	if frames.is_empty() and not last_frames.is_empty():
+		_rebuild_frames(last_frames)
+		return
 
+	last_frames = frames.duplicate(true)
 	_rebuild_frames(frames)
 
 
-func _merge_edges(message: Variant) -> void:
+func _merge_edges_into(store: Dictionary, message: Variant) -> void:
 	var transforms := _transforms_from(message)
 	for transform_value in transforms:
 		if typeof(transform_value) != TYPE_DICTIONARY:
@@ -55,9 +63,9 @@ func _merge_edges(message: Variant) -> void:
 		var child := _normalize_frame_id(str(transform.get("child_frame_id", "")))
 		if parent.is_empty() or child.is_empty():
 			continue
-		edge_store[child] = {
+		store[child] = {
 			"parent": parent,
-			"transform": _transform_from_tf(transform.get("transform", {})),
+			"transform": _transform_from_tf(transform),
 		}
 
 
@@ -100,8 +108,10 @@ func _transform_from_tf(transform_value: Variant) -> Transform3D:
 	if typeof(transform_value) != TYPE_DICTIONARY:
 		return Transform3D.IDENTITY
 	var transform: Dictionary = transform_value
-	var translation: Variant = transform.get("translation", {})
-	var rotation: Variant = transform.get("rotation", {})
+	var source_value: Variant = transform.get("transform", transform)
+	var source: Dictionary = source_value as Dictionary if typeof(source_value) == TYPE_DICTIONARY else transform
+	var translation: Variant = source.get("translation", transform.get("translation", {}))
+	var rotation: Variant = source.get("rotation", transform.get("rotation", {}))
 	var x := 0.0
 	var y := 0.0
 	var z := 0.0
@@ -117,9 +127,7 @@ func _transform_from_tf(transform_value: Variant) -> Transform3D:
 
 func _resolved_frames(edges: Dictionary, robot_pose: Variant) -> Dictionary:
 	var frames := {}
-	var cache := {
-		"map": Transform3D.IDENTITY,
-	}
+	var cache := _root_frame_cache(edges)
 	var frame_names := edges.keys()
 	frame_names.sort()
 	for frame_id in frame_names:
@@ -138,6 +146,21 @@ func _resolved_frames(edges: Dictionary, robot_pose: Variant) -> Dictionary:
 		if not frames.has("base_footprint"):
 			frames["base_footprint"] = fallback
 	return frames
+
+
+func _root_frame_cache(edges: Dictionary) -> Dictionary:
+	var cache := {
+		"map": Transform3D.IDENTITY,
+	}
+	for child_frame in edges.keys():
+		var edge_value: Variant = edges.get(child_frame, {})
+		if typeof(edge_value) != TYPE_DICTIONARY:
+			continue
+		var parent := _normalize_frame_id(str((edge_value as Dictionary).get("parent", "")))
+		if parent.is_empty() or edges.has(parent) or cache.has(parent):
+			continue
+		cache[parent] = Transform3D.IDENTITY
+	return cache
 
 
 func _resolve_frame(frame_id: String, edges: Dictionary, cache: Dictionary, depth: int) -> Variant:

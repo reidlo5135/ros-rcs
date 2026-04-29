@@ -121,7 +121,7 @@ func _ready() -> void:
 
 
 func _build_ui() -> void:
-	custom_minimum_size = Vector2(260, 0)
+	custom_minimum_size = Vector2(272, 0)
 	add_theme_stylebox_override("panel", _panel_style())
 
 	var margin := MarginContainer.new()
@@ -133,7 +133,7 @@ func _build_ui() -> void:
 
 	var column := VBoxContainer.new()
 	column.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	column.add_theme_constant_override("separation", 8)
+	column.add_theme_constant_override("separation", 10)
 	margin.add_child(column)
 
 	_add_section_header(column, "GLOBAL OPTIONS")
@@ -237,8 +237,8 @@ func _add_section_header(parent: Control, text: String, action := Callable()) ->
 
 	var label := Label.new()
 	label.text = text
-	label.add_theme_color_override("font_color", Color(0.42, 0.49, 0.58))
-	label.add_theme_font_size_override("font_size", 10)
+	label.add_theme_color_override("font_color", Color(0.56, 0.62, 0.64))
+	label.add_theme_font_size_override("font_size", 11)
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(label)
 
@@ -251,14 +251,14 @@ func _add_section_header(parent: Control, text: String, action := Callable()) ->
 func _add_field_label(parent: Control, text: String) -> void:
 	var label := Label.new()
 	label.text = text
-	label.add_theme_color_override("font_color", Color(0.44, 0.51, 0.6))
+	label.add_theme_color_override("font_color", Color(0.62, 0.68, 0.7))
 	parent.add_child(label)
 
 
 func _add_button(parent: Control, label: String, bg: Color, fg: Color, callback: Callable) -> Button:
 	var button := Button.new()
 	button.text = label
-	button.custom_minimum_size = Vector2(0, 32)
+	button.custom_minimum_size = Vector2(0, 34)
 	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	button.add_theme_stylebox_override("normal", _button_style(bg, bg.lightened(0.18)))
@@ -286,7 +286,7 @@ func _layer_row(label_text: String, layer_id: String, icon_kind: String, accent:
 
 	var label := Label.new()
 	label.text = label_text
-	label.add_theme_color_override("font_color", Color(0.42, 0.49, 0.58))
+	label.add_theme_color_override("font_color", Color(0.66, 0.72, 0.74))
 	row.add_child(label)
 	return row
 
@@ -362,16 +362,20 @@ func _separator() -> HSeparator:
 
 func _panel_style() -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.045, 0.055, 0.068)
-	style.border_color = Color(0.16, 0.19, 0.24)
+	style.bg_color = Color(0.055, 0.058, 0.06)
+	style.border_color = Color(0.2, 0.24, 0.23)
 	style.set_border_width_all(1)
+	style.corner_radius_top_left = 8
+	style.corner_radius_top_right = 8
+	style.corner_radius_bottom_left = 8
+	style.corner_radius_bottom_right = 8
 	return style
 
 
 func _input_style() -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.015, 0.018, 0.022)
-	style.border_color = Color(0.18, 0.23, 0.3)
+	style.bg_color = Color(0.036, 0.039, 0.041)
+	style.border_color = Color(0.19, 0.25, 0.24)
 	style.set_border_width_all(1)
 	style.content_margin_left = 8
 	style.content_margin_right = 8
@@ -385,10 +389,10 @@ func _button_style(bg: Color, border: Color) -> StyleBoxFlat:
 	style.bg_color = bg
 	style.border_color = border
 	style.set_border_width_all(1)
-	style.corner_radius_top_left = 2
-	style.corner_radius_top_right = 2
-	style.corner_radius_bottom_left = 2
-	style.corner_radius_bottom_right = 2
+	style.corner_radius_top_left = 6
+	style.corner_radius_top_right = 6
+	style.corner_radius_bottom_left = 6
+	style.corner_radius_bottom_right = 6
 	return style
 
 

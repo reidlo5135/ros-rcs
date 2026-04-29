@@ -18,11 +18,9 @@ func _run() -> void:
 			"transforms": [
 				{
 					"header": {"frame_id": "map"},
-					"child_frame_id": "base_link",
-					"transform": {
-						"translation": {"x": 1.0, "y": 2.0, "z": 0.0},
-						"rotation": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
-					},
+					"child_frame_id": "odom",
+					"translation": {"x": 1.0, "y": 2.0, "z": 0.0},
+					"rotation": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
 				},
 			],
 		},
@@ -34,12 +32,24 @@ func _run() -> void:
 		"tf": {
 			"transforms": [
 				{
-					"header": {"frame_id": "map"},
-					"child_frame_id": "map2odom",
-					"transform": {
-						"translation": {"x": 0.2, "y": 0.1, "z": 0.0},
-						"rotation": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
-					},
+					"header": {"frame_id": "odom"},
+					"child_frame_id": "base_footprint",
+					"translation": {"x": 0.2, "y": 0.1, "z": 0.0},
+					"rotation": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
+				},
+			],
+		},
+		"robot_pose": {},
+	})
+	layer.apply_state({
+		"tf_static": {},
+		"tf": {
+			"transforms": [
+				{
+					"header": {"frame_id": "base_footprint"},
+					"child_frame_id": "base_link",
+					"translation": {"x": 0.0, "y": 0.0, "z": 0.0},
+					"rotation": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
 				},
 			],
 		},
@@ -47,8 +57,8 @@ func _run() -> void:
 	})
 
 	var frame_root := layer.get_node_or_null("TfFrames")
-	if frame_root == null or not frame_root.has_node("base_link") or not frame_root.has_node("map2odom") or not frame_root.has_node("map"):
-		push_error("TF layer did not preserve map, base_link, and map2odom frames together")
+	if frame_root == null or not frame_root.has_node("map") or not frame_root.has_node("odom") or not frame_root.has_node("base_footprint") or not frame_root.has_node("base_link"):
+		push_error("TF layer did not preserve incremental map -> odom -> base_footprint -> base_link frames")
 		layer.queue_free()
 		quit(1)
 		return
